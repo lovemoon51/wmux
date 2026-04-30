@@ -27,6 +27,7 @@ function printUsage() {
   wmux capabilities [--json]
   wmux list-workspaces [--json]
   wmux surface list [--workspace <id>] [--json]
+  wmux surface focus --surface <id> [--json]
   wmux send <text> [--json]
   wmux send-key <key> [--surface <id>] [--json]
   wmux notify --title <title> [--body <body>] [--json]
@@ -250,16 +251,30 @@ function createRequest() {
 
   if (command === "surface") {
     const surfaceCommand = args[1];
-    if (surfaceCommand !== "list") {
-      throw cliError(`未知 surface 命令：${surfaceCommand ?? ""}`);
+
+    if (surfaceCommand === "list") {
+      return {
+        method: "surface.list",
+        params: {
+          ...(parseOption("--workspace") ? { workspaceId: parseOption("--workspace") } : {})
+        }
+      };
     }
 
-    return {
-      method: "surface.list",
-      params: {
-        ...(parseOption("--workspace") ? { workspaceId: parseOption("--workspace") } : {})
+    if (surfaceCommand === "focus") {
+      const surfaceId = parseOption("--surface");
+      if (!surfaceId || surfaceId.startsWith("--")) {
+        throw cliError("surface focus 需要 --surface <id>");
       }
-    };
+      return {
+        method: "surface.focus",
+        params: {
+          surfaceId
+        }
+      };
+    }
+
+    throw cliError(`未知 surface 命令：${surfaceCommand ?? ""}`);
   }
 
   if (command === "send") {
@@ -506,6 +521,11 @@ function printResult(result) {
   }
 
   if (command === "surface") {
+    if (args[1] === "focus") {
+      console.log(`focused ${result?.surfaceId ?? "surface"}`);
+      return;
+    }
+
     for (const surface of result?.surfaces ?? []) {
       const activePrefix = surface.active ? "*" : " ";
       const subtitle = surface.subtitle ? `\t${surface.subtitle}` : "";

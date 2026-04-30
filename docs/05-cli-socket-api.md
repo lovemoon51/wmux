@@ -69,7 +69,7 @@ wmux new-terminal --name "Tests" --cwd .
 wmux new-browser --url http://localhost:3000 --name Preview
 wmux split right
 wmux split down
-wmux focus-surface --surface surface:2
+wmux surface focus --surface surface:2
 wmux close-surface --surface surface:2
 ```
 

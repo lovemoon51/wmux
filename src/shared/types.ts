@@ -81,6 +81,7 @@ export type SocketRpcMethod =
   | "system.capabilities"
   | "workspace.list"
   | "surface.list"
+  | "surface.focus"
   | "surface.sendText"
   | "surface.sendKey"
   | "status.notify"
@@ -174,6 +175,10 @@ export type StatusListParams = {
 
 export type SurfaceListParams = {
   workspaceId?: string;
+};
+
+export type SurfaceFocusParams = {
+  surfaceId: string;
 };
 
 export type SurfaceSummary = {

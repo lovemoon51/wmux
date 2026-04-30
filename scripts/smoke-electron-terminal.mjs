@@ -328,45 +328,59 @@ async function runTerminalCommand(window, command, expectedText) {
 async function navigateActiveBrowser(activePane, url) {
   const address = activePane.locator(".surfaceBodyFrameActive .browserSurface input[aria-label='Browser address']");
   await address.waitFor({ timeout: 15_000 });
+  const webview = activePane.locator("webview");
+  const navigation = webview.evaluate(
+    (webviewElement, targetUrl) =>
+      new Promise((resolve, reject) => {
+        const matchesTarget = () => {
+          const currentUrl = webviewElement.getURL?.() ?? "";
+          return currentUrl === targetUrl || decodeURIComponent(currentUrl) === targetUrl;
+        };
+        if (matchesTarget()) {
+          resolve(webviewElement.getURL?.());
+          return;
+        }
+        let attempts = 0;
+        const poll = window.setInterval(() => {
+          attempts += 1;
+          if (matchesTarget()) {
+            cleanup();
+            resolve(webviewElement.getURL?.());
+          }
+          if (attempts > 150) {
+            cleanup();
+            reject(new Error(`browser did not navigate to ${targetUrl}`));
+          }
+        }, 100);
+        const cleanup = () => {
+          window.clearInterval(poll);
+          webviewElement.removeEventListener("did-navigate", handleNavigate);
+          webviewElement.removeEventListener("did-finish-load", handleNavigate);
+        };
+        const handleNavigate = () => {
+          if (matchesTarget()) {
+            cleanup();
+            resolve(targetUrl);
+          }
+        };
+        webviewElement.addEventListener("did-navigate", handleNavigate);
+        webviewElement.addEventListener("did-finish-load", handleNavigate);
+      }),
+    url
+  );
   await address.fill(url);
   await address.evaluate((input) => input.dispatchEvent(new Event("input", { bubbles: true })));
   await address.evaluate((input) => input.blur());
   await address.evaluate((input) => {
     input.form?.requestSubmit();
   });
-  await activePane.locator("webview").evaluate(
-    (webview, targetUrl) =>
-      new Promise((resolve, reject) => {
-        const currentUrl = webview.getURL?.();
-        if (currentUrl === targetUrl) {
-          resolve(currentUrl);
-          return;
-        }
-        const timer = window.setTimeout(() => {
-          cleanup();
-          reject(new Error(`browser did not navigate to ${targetUrl}`));
-        }, 15_000);
-        const cleanup = () => {
-          window.clearTimeout(timer);
-          webview.removeEventListener("did-navigate", handleNavigate);
-          webview.removeEventListener("did-finish-load", handleNavigate);
-        };
-        const handleNavigate = () => {
-          if (webview.getURL?.() === targetUrl) {
-            cleanup();
-            resolve(targetUrl);
-          }
-        };
-        webview.addEventListener("did-navigate", handleNavigate);
-        webview.addEventListener("did-finish-load", handleNavigate);
-      }),
-    url
-  );
+  await navigation;
 }
 
 function activeBrowserUrlMatches(targetUrl) {
   const activeBrowser = document.querySelector(".surfaceBodyFrameActive .browserSurface input[aria-label='Browser address']");
-  return activeBrowser?.closest(".surfaceBodyFrameActive")?.querySelector("webview")?.getURL?.() === targetUrl;
+  const currentUrl = activeBrowser?.closest(".surfaceBodyFrameActive")?.querySelector("webview")?.getURL?.();
+  return typeof currentUrl === "string" && (currentUrl === targetUrl || decodeURIComponent(currentUrl) === targetUrl);
 }
 
 async function runEightTerminalSurfaceLatencySmoke(window) {
@@ -453,6 +467,7 @@ async function runCliSocketSmoke(window) {
     "system.identify",
     "system.capabilities",
     "surface.list",
+    "surface.focus",
     "surface.sendKey",
     "status.clear",
     "status.list",
@@ -480,6 +495,26 @@ async function runCliSocketSmoke(window) {
     throw new Error(`wmux surface list --json did not include active surface-agent: ${surfaceJsonOutput}`);
   }
   log("ok wmux surface list");
+
+  const focusShellOutput = await runCliCommand(["surface", "focus", "--surface", "surface-shell"]);
+  if (!focusShellOutput.includes("focused surface-shell")) {
+    throw new Error(`wmux surface focus did not report focused surface-shell: ${focusShellOutput}`);
+  }
+  const focusedShellOutput = await runCliCommand(["identify", "--json"]);
+  const focusedShell = JSON.parse(focusedShellOutput);
+  if (focusedShell.surfaceId !== "surface-shell" || focusedShell.paneId !== "pane-terminal") {
+    throw new Error(`wmux surface focus did not activate surface-shell: ${focusedShellOutput}`);
+  }
+  const focusAgentOutput = await runCliCommand(["surface", "focus", "--surface", "surface-agent"]);
+  if (!focusAgentOutput.includes("focused surface-agent")) {
+    throw new Error(`wmux surface focus did not report focused surface-agent: ${focusAgentOutput}`);
+  }
+  const focusedAgentOutput = await runCliCommand(["identify", "--json"]);
+  const focusedAgent = JSON.parse(focusedAgentOutput);
+  if (focusedAgent.surfaceId !== "surface-agent" || focusedAgent.paneId !== "pane-terminal") {
+    throw new Error(`wmux surface focus did not restore surface-agent: ${focusedAgentOutput}`);
+  }
+  log("ok wmux surface focus");
 
   await window.locator('button.surfaceTab[aria-label="Codex Agent"]').click();
   await window.waitForSelector(".paneActive .surfaceBodyFrameActive .terminalHost .xterm textarea", {

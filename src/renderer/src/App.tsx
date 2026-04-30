@@ -59,6 +59,7 @@ import type {
   SocketSecuritySettings,
   StatusListParams,
   Surface,
+  SurfaceFocusParams,
   SurfaceListParams,
   SurfaceSummary,
   WmuxCommandConfig,
@@ -765,6 +766,7 @@ const socketCapabilities: SocketRpcMethod[] = [
   "system.capabilities",
   "workspace.list",
   "surface.list",
+  "surface.focus",
   "surface.sendText",
   "surface.sendKey",
   "status.notify",
@@ -1917,6 +1919,77 @@ export function App(): ReactElement {
         window.wmux?.socket.respond(
           createSocketSuccessResponse(request.id, {
             surfaces: createSurfaceSummaries(currentWorkspaces, currentActiveWorkspaceId, params.workspaceId)
+          })
+        );
+        return;
+      }
+
+      if (request.method === "surface.focus") {
+        const params = (request.params ?? {}) as Partial<SurfaceFocusParams>;
+        if (typeof params.surfaceId !== "string" || !params.surfaceId.trim()) {
+          window.wmux?.socket.respond(createSocketErrorResponse(request.id, "BAD_REQUEST", "surface.focus 需要 surfaceId"));
+          return;
+        }
+
+        let target:
+          | {
+              workspace: Workspace;
+              paneId: string;
+              surface: Surface;
+            }
+          | undefined;
+        for (const workspace of currentWorkspaces) {
+          const surface = workspace.surfaces[params.surfaceId];
+          if (!surface) {
+            continue;
+          }
+          const pane = Object.values(workspace.panes).find((item) => item.surfaceIds.includes(surface.id));
+          if (pane) {
+            target = { workspace, paneId: pane.id, surface };
+            break;
+          }
+        }
+
+        if (!target) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "NOT_FOUND", "找不到 surface", {
+              surfaceId: params.surfaceId
+            })
+          );
+          return;
+        }
+
+        setActiveWorkspaceId(target.workspace.id);
+        setWorkspaces((items) =>
+          items.map((workspace) => {
+            if (workspace.id !== target?.workspace.id) {
+              return workspace;
+            }
+            const pane = workspace.panes[target.paneId];
+            const surface = workspace.surfaces[target.surface.id];
+            if (!pane || !surface) {
+              return workspace;
+            }
+            return {
+              ...workspace,
+              activePaneId: pane.id,
+              panes: {
+                ...workspace.panes,
+                [pane.id]: {
+                  ...pane,
+                  activeSurfaceId: surface.id
+                }
+              }
+            };
+          })
+        );
+
+        window.wmux?.socket.respond(
+          createSocketSuccessResponse(request.id, {
+            workspaceId: target.workspace.id,
+            paneId: target.paneId,
+            surfaceId: target.surface.id,
+            surfaceType: target.surface.type
           })
         );
         return;
