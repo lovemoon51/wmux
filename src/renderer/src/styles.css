@@ -400,7 +400,7 @@ kbd {
 .notificationItem {
   display: grid;
   min-width: 0;
-  grid-template-columns: 12px minmax(0, 1fr);
+  grid-template-columns: 12px minmax(0, 1fr) auto auto;
   gap: 8px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
@@ -459,6 +459,24 @@ kbd {
 .notificationEmpty {
   color: var(--text-muted);
   font-size: 11px;
+}
+
+.notificationOpenButton,
+.notificationClearButton {
+  align-self: center;
+  height: 24px;
+  border: 1px solid #303844;
+  border-radius: var(--radius-sm);
+  background: #171c22;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.notificationOpenButton:hover,
+.notificationClearButton:hover {
+  border-color: var(--border-strong);
+  background: #20252d;
+  color: var(--text-primary);
 }
 
 .settingsField {

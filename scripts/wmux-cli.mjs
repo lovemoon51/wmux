@@ -29,6 +29,7 @@ function printUsage() {
   wmux send <text> [--json]
   wmux send-key <key> [--surface <id>] [--json]
   wmux notify --title <title> [--body <body>] [--json]
+  wmux clear-status [--workspace <id>] [--json]
   wmux browser navigate <url> [--surface <id>] [--create] [--wait load|domcontentloaded|none] [--timeout <ms>] [--json]
   wmux browser open <url> [--json]
   wmux browser list [--json]
@@ -279,6 +280,15 @@ function createRequest() {
     return { method: "status.notify", params: { title, body } };
   }
 
+  if (command === "clear-status") {
+    return {
+      method: "status.clear",
+      params: {
+        ...(parseOption("--workspace") ? { workspaceId: parseOption("--workspace") } : {})
+      }
+    };
+  }
+
   if (command === "browser") {
     return createBrowserRequest();
   }
@@ -447,6 +457,11 @@ function printResult(result) {
 
   if (command === "notify") {
     console.log(`notified ${result?.workspaceId ?? "workspace"}`);
+    return;
+  }
+
+  if (command === "clear-status") {
+    console.log(`cleared ${result?.workspaceId ?? "workspace"}`);
   }
 }
 

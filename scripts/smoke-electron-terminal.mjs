@@ -325,6 +325,15 @@ async function runTerminalCommand(window, command, expectedText) {
   log(`ok ${command}`);
 }
 
+async function navigateActiveBrowser(activePane, url) {
+  const address = activePane.locator(".surfaceBodyFrameActive .browserSurface input[aria-label='Browser address']");
+  await address.waitFor({ timeout: 15_000 });
+  await address.fill(url);
+  await address.evaluate((input) => {
+    input.form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
+}
+
 async function runEightTerminalSurfaceLatencySmoke(window) {
   log("eight terminal surface latency");
   await window.getByLabel("Open workspace API Server").click();
@@ -392,7 +401,7 @@ async function runCliSocketSmoke(window) {
 
   const capabilitiesOutput = await runCliCommand(["capabilities", "--json"]);
   const capabilities = JSON.parse(capabilitiesOutput);
-  for (const method of ["system.identify", "system.capabilities", "surface.sendKey", "browser.list"]) {
+  for (const method of ["system.identify", "system.capabilities", "surface.sendKey", "status.clear", "browser.list"]) {
     if (!capabilities.methods?.includes(method)) {
       throw new Error(`wmux capabilities did not include ${method}: ${capabilitiesOutput}`);
     }
@@ -456,6 +465,35 @@ async function runCliSocketSmoke(window) {
   await apiWorkspaceItem.getByText("Needs input").waitFor({ timeout: 15_000 });
   await apiWorkspaceItem.getByText("WMUX_CLI_NOTIFY: socket smoke").waitFor({ timeout: 15_000 });
   await window.getByLabel("Notifications panel").getByText("WMUX_CLI_NOTIFY: socket smoke").waitFor({ timeout: 15_000 });
+
+  const clearOutput = await runCliCommand(["clear-status"]);
+  if (!clearOutput.includes("cleared")) {
+    throw new Error(`wmux clear-status did not report success: ${clearOutput}`);
+  }
+  await window.waitForFunction(() => !document.body.textContent?.includes("WMUX_CLI_NOTIFY: socket smoke"), null, {
+    timeout: 15_000
+  });
+  await apiWorkspaceItem.getByText("Idle").waitFor({ timeout: 15_000 });
+  log("ok wmux clear-status");
+
+  const uiNotifyOutput = await runCliCommand([
+    "notify",
+    "--title",
+    "WMUX_UI_CLEAR",
+    "--body",
+    "socket smoke"
+  ]);
+  if (!uiNotifyOutput.includes("notified")) {
+    throw new Error(`wmux notify did not report success for UI clear smoke: ${uiNotifyOutput}`);
+  }
+  await window.getByLabel("Notifications panel").getByText("WMUX_UI_CLEAR: socket smoke").waitFor({ timeout: 15_000 });
+  await window.getByLabel("Clear notification API Server").click();
+  await window.waitForFunction(() => !document.body.textContent?.includes("WMUX_UI_CLEAR: socket smoke"), null, {
+    timeout: 15_000
+  });
+  await apiWorkspaceItem.getByText("Idle").waitFor({ timeout: 15_000 });
+  log("ok notification clear button");
+
   await window.getByRole("button", { name: /Notifications/ }).click();
   await window.getByLabel("Notifications panel").waitFor({ state: "detached", timeout: 15_000 });
   log("ok wmux notify");
@@ -551,20 +589,16 @@ async function runBrowserCrud(window) {
   await window.getByRole("heading", { name: "API Server" }).waitFor({ timeout: 15_000 });
   const titleBar = window.locator(".titleBar");
   await titleBar.getByRole("button", { name: "Browser", exact: true }).click();
-  const activePane = window.locator(".paneActive").first();
-  const browserTab = window.locator(".paneActive button.surfaceTab").filter({ hasText: /Browser/ }).last();
+  const browserTab = window.locator(".pane button.surfaceTab").filter({ hasText: /Browser/ }).last();
   await browserTab.waitFor({ timeout: 15_000 });
   await browserTab.click();
+  const activePane = window.locator(".paneActive").first();
   await activePane.locator(".surfaceBodyFrameActive webview").waitFor({ timeout: 15_000 });
 
   const firstUrl = "data:text/html,<title>WMUX Browser One</title><h1>WMUX_BROWSER_ONE</h1>";
   const secondUrl = "data:text/html,<title>WMUX Browser Two</title><h1>WMUX_BROWSER_TWO</h1>";
-  const address = activePane.locator(".surfaceBodyFrameActive").getByLabel("Browser address");
-  await address.waitFor({ timeout: 15_000 });
-  await address.click();
 
-  await address.fill(firstUrl);
-  await address.press("Enter");
+  await navigateActiveBrowser(activePane, firstUrl);
   await window.waitForFunction(
     (targetUrl) => document.querySelector(".paneActive webview")?.getURL?.() === targetUrl,
     firstUrl,
@@ -609,8 +643,7 @@ async function runBrowserCrud(window) {
   );
   log("ok browser auto zoom fit");
 
-  await address.fill(secondUrl);
-  await address.press("Enter");
+  await navigateActiveBrowser(activePane, secondUrl);
   await window.waitForFunction(
     (targetUrl) => document.querySelector(".paneActive webview")?.getURL?.() === targetUrl,
     secondUrl,

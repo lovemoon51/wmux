@@ -42,6 +42,7 @@ import type {
   BrowserSnapshotParams,
   BrowserSurfaceSelector,
   BrowserWaitUntil,
+  ClearStatusParams,
   LayoutNode,
   NotifyParams,
   PersistedAppState,
@@ -763,6 +764,7 @@ const socketCapabilities: SocketRpcMethod[] = [
   "surface.sendText",
   "surface.sendKey",
   "status.notify",
+  "status.clear",
   "browser.navigate",
   "browser.click",
   "browser.fill",
@@ -1812,6 +1814,20 @@ export function App(): ReactElement {
     );
   };
 
+  const clearWorkspaceStatus = useCallback((workspaceId: string): void => {
+    setWorkspaces((currentWorkspaces) =>
+      currentWorkspaces.map((workspace) =>
+        workspace.id === workspaceId
+          ? {
+              ...workspace,
+              status: "idle",
+              notice: undefined
+            }
+          : workspace
+      )
+    );
+  }, []);
+
   useEffect(() => {
     const removeSocketRequestListener = window.wmux?.socket.onRequest((request: SocketRpcRequest) => {
       const currentWorkspaces = workspacesRef.current;
@@ -1939,6 +1955,34 @@ export function App(): ReactElement {
           )
         );
         window.wmux?.socket.respond(createSocketSuccessResponse(request.id, { workspaceId: targetWorkspaceId, notice }));
+        return;
+      }
+
+      if (request.method === "status.clear") {
+        const params = (request.params ?? {}) as Partial<ClearStatusParams>;
+        const targetWorkspaceId = params.workspaceId ?? currentActiveWorkspaceId;
+        const targetWorkspace = currentWorkspaces.find((workspace) => workspace.id === targetWorkspaceId);
+        if (!targetWorkspace) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "NOT_FOUND", "找不到 workspace", {
+              workspaceId: targetWorkspaceId
+            })
+          );
+          return;
+        }
+
+        setWorkspaces((items) =>
+          items.map((workspace) =>
+            workspace.id === targetWorkspaceId
+              ? {
+                  ...workspace,
+                  status: "idle",
+                  notice: undefined
+                }
+              : workspace
+          )
+        );
+        window.wmux?.socket.respond(createSocketSuccessResponse(request.id, { workspaceId: targetWorkspaceId, status: "idle" }));
         return;
       }
 
@@ -2488,6 +2532,7 @@ export function App(): ReactElement {
         onCommitRename={handleCommitRenameWorkspace}
         onCancelRename={handleCancelRenameWorkspace}
         onClose={handleCloseWorkspace}
+        onClearStatus={clearWorkspaceStatus}
         onOpenCommandPalette={openCommandPalette}
         settingsOpen={settingsOpen}
         notificationsOpen={notificationsOpen}
@@ -2737,6 +2782,7 @@ function WorkspaceSidebar({
   onCommitRename,
   onCancelRename,
   onClose,
+  onClearStatus,
   onOpenCommandPalette,
   settingsOpen,
   notificationsOpen,
@@ -2758,6 +2804,7 @@ function WorkspaceSidebar({
   onCommitRename: () => void;
   onCancelRename: () => void;
   onClose: (id: string) => void;
+  onClearStatus: (id: string) => void;
   onOpenCommandPalette: () => void;
   settingsOpen: boolean;
   notificationsOpen: boolean;
@@ -2934,11 +2981,9 @@ function WorkspaceSidebar({
           <div className="notificationPanel" aria-label="Notifications panel">
             {notificationItems.length ? (
               notificationItems.map((workspace) => (
-                <button
+                <div
                   className="notificationItem"
-                  type="button"
                   key={workspace.id}
-                  onClick={() => onSelect(workspace.id)}
                 >
                   <span className={`statusRing ${statusClass[workspace.status]}`} />
                   <span className="notificationMain">
@@ -2948,7 +2993,22 @@ function WorkspaceSidebar({
                     </span>
                     <span className="notificationText">{workspace.notice}</span>
                   </span>
-                </button>
+                  <button
+                    className="notificationOpenButton"
+                    type="button"
+                    onClick={() => onSelect(workspace.id)}
+                  >
+                    Open
+                  </button>
+                  <button
+                    className="notificationClearButton"
+                    type="button"
+                    aria-label={`Clear notification ${workspace.name}`}
+                    onClick={() => onClearStatus(workspace.id)}
+                  >
+                    Clear
+                  </button>
+                </div>
               ))
             ) : (
               <div className="notificationEmpty">No workspace notifications</div>

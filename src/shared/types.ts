@@ -83,6 +83,7 @@ export type SocketRpcMethod =
   | "surface.sendText"
   | "surface.sendKey"
   | "status.notify"
+  | "status.clear"
   | BrowserRpcMethod;
 
 export type SocketRpcRequest = {
@@ -158,6 +159,10 @@ export type SendKeyParams = {
 export type NotifyParams = {
   title: string;
   body?: string;
+  workspaceId?: string;
+};
+
+export type ClearStatusParams = {
   workspaceId?: string;
 };
 
