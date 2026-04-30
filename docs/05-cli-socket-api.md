@@ -86,10 +86,9 @@ wmux paste
 
 ```bash
 wmux notify --title "Build complete" --body "All checks passed"
-wmux set-status build "running" --icon activity --color "#e2b84d"
-wmux set-status tests "failed" --icon x-circle --color "#ef6b73"
-wmux clear-status build
-wmux list-status
+wmux status list
+wmux status list --json
+wmux clear-status
 ```
 
 ### 浏览器
@@ -124,8 +123,9 @@ wmux browser errors list --surface surface:3
 | `surface.focus` | `{ surfaceId }` | ok |
 | `surface.sendText` | `{ surfaceId?, text }` | ok |
 | `surface.sendKey` | `{ surfaceId?, key }` | ok |
-| `status.set` | `{ workspaceId?, key, text, icon?, color? }` | ok |
-| `status.clear` | `{ workspaceId?, key }` | ok |
+| `status.notify` | `{ workspaceId?, title, body? }` | notice |
+| `status.clear` | `{ workspaceId? }` | ok |
+| `status.list` | `{ workspaceId? }` | workspace status list |
 | `browser.navigate` | `{ surfaceId, url }` | ok |
 | `browser.snapshot` | `{ surfaceId, selector?, compact? }` | snapshot |
 | `browser.screenshot` | `{ surfaceId, path? }` | path/base64 |

@@ -334,6 +334,11 @@ async function navigateActiveBrowser(activePane, url) {
   });
 }
 
+function activeBrowserUrlMatches(targetUrl) {
+  const activeBrowser = document.querySelector(".surfaceBodyFrameActive .browserSurface input[aria-label='Browser address']");
+  return activeBrowser?.closest(".surfaceBodyFrameActive")?.querySelector("webview")?.getURL?.() === targetUrl;
+}
+
 async function runEightTerminalSurfaceLatencySmoke(window) {
   log("eight terminal surface latency");
   await window.getByLabel("Open workspace API Server").click();
@@ -401,7 +406,14 @@ async function runCliSocketSmoke(window) {
 
   const capabilitiesOutput = await runCliCommand(["capabilities", "--json"]);
   const capabilities = JSON.parse(capabilitiesOutput);
-  for (const method of ["system.identify", "system.capabilities", "surface.sendKey", "status.clear", "browser.list"]) {
+  for (const method of [
+    "system.identify",
+    "system.capabilities",
+    "surface.sendKey",
+    "status.clear",
+    "status.list",
+    "browser.list"
+  ]) {
     if (!capabilities.methods?.includes(method)) {
       throw new Error(`wmux capabilities did not include ${method}: ${capabilitiesOutput}`);
     }
@@ -465,6 +477,17 @@ async function runCliSocketSmoke(window) {
   await apiWorkspaceItem.getByText("Needs input").waitFor({ timeout: 15_000 });
   await apiWorkspaceItem.getByText("WMUX_CLI_NOTIFY: socket smoke").waitFor({ timeout: 15_000 });
   await window.getByLabel("Notifications panel").getByText("WMUX_CLI_NOTIFY: socket smoke").waitFor({ timeout: 15_000 });
+
+  const statusListOutput = await runCliCommand(["status", "list"]);
+  if (!statusListOutput.includes("API Server") || !statusListOutput.includes("WMUX_CLI_NOTIFY: socket smoke")) {
+    throw new Error(`wmux status list did not include the active notice: ${statusListOutput}`);
+  }
+  const statusListJsonOutput = await runCliCommand(["status", "list", "--json"]);
+  const statusList = JSON.parse(statusListJsonOutput);
+  if (!statusList.statuses?.some((item) => item.name === "API Server" && item.notice === "WMUX_CLI_NOTIFY: socket smoke")) {
+    throw new Error(`wmux status list --json did not include the active notice: ${statusListJsonOutput}`);
+  }
+  log("ok wmux status list");
 
   const clearOutput = await runCliCommand(["clear-status"]);
   if (!clearOutput.includes("cleared")) {
@@ -589,21 +612,20 @@ async function runBrowserCrud(window) {
   await window.getByRole("heading", { name: "API Server" }).waitFor({ timeout: 15_000 });
   const titleBar = window.locator(".titleBar");
   await titleBar.getByRole("button", { name: "Browser", exact: true }).click();
-  const browserTab = window.locator(".pane button.surfaceTab").filter({ hasText: /Browser/ }).last();
+  const browserTab = window.locator(".pane button.surfaceTab").filter({ hasText: /Browser/ }).first();
   await browserTab.waitFor({ timeout: 15_000 });
   await browserTab.click();
-  const activePane = window.locator(".paneActive").first();
+  const activePane = window.locator(".pane").filter({
+    has: window.locator(".surfaceBodyFrameActive .browserSurface input[aria-label='Browser address']")
+  }).first();
+  await activePane.waitFor({ timeout: 15_000 });
   await activePane.locator(".surfaceBodyFrameActive webview").waitFor({ timeout: 15_000 });
 
   const firstUrl = "data:text/html,<title>WMUX Browser One</title><h1>WMUX_BROWSER_ONE</h1>";
   const secondUrl = "data:text/html,<title>WMUX Browser Two</title><h1>WMUX_BROWSER_TWO</h1>";
 
   await navigateActiveBrowser(activePane, firstUrl);
-  await window.waitForFunction(
-    (targetUrl) => document.querySelector(".paneActive webview")?.getURL?.() === targetUrl,
-    firstUrl,
-    { timeout: 15_000 }
-  );
+  await window.waitForFunction(activeBrowserUrlMatches, firstUrl, { timeout: 15_000 });
   log("ok browser first url");
   const browserMetrics = await activePane.locator("webview").evaluate((webview) => {
     const rect = webview.getBoundingClientRect();
@@ -635,7 +657,10 @@ async function runBrowserCrud(window) {
   const resizedBrowserWidth = await activePane.locator("webview").evaluate((webview) => webview.getBoundingClientRect().width);
   await window.waitForFunction(
     async ({ shouldZoom }) => {
-      const zoomFactor = await document.querySelector(".paneActive webview")?.getZoomFactor?.();
+      const activeBrowser = document.querySelector(
+        ".surfaceBodyFrameActive .browserSurface input[aria-label='Browser address']"
+      );
+      const zoomFactor = await activeBrowser?.closest(".surfaceBodyFrameActive")?.querySelector("webview")?.getZoomFactor?.();
       return typeof zoomFactor === "number" && (!shouldZoom || zoomFactor < 0.98);
     },
     { shouldZoom: resizedBrowserWidth < 960 },
@@ -644,36 +669,20 @@ async function runBrowserCrud(window) {
   log("ok browser auto zoom fit");
 
   await navigateActiveBrowser(activePane, secondUrl);
-  await window.waitForFunction(
-    (targetUrl) => document.querySelector(".paneActive webview")?.getURL?.() === targetUrl,
-    secondUrl,
-    { timeout: 15_000 }
-  );
+  await window.waitForFunction(activeBrowserUrlMatches, secondUrl, { timeout: 15_000 });
   log("ok browser second url");
 
   await activePane.getByLabel("Back").click();
-  await window.waitForFunction(
-    (targetUrl) => document.querySelector(".paneActive webview")?.getURL?.() === targetUrl,
-    firstUrl,
-    { timeout: 15_000 }
-  );
+  await window.waitForFunction(activeBrowserUrlMatches, firstUrl, { timeout: 15_000 });
   log("ok browser back");
 
   await expectEnabled(activePane.getByLabel("Forward"));
   await activePane.getByLabel("Forward").click();
-  await window.waitForFunction(
-    (targetUrl) => document.querySelector(".paneActive webview")?.getURL?.() === targetUrl,
-    secondUrl,
-    { timeout: 15_000 }
-  );
+  await window.waitForFunction(activeBrowserUrlMatches, secondUrl, { timeout: 15_000 });
   log("ok browser forward");
 
   await activePane.getByLabel("Reload").click();
-  await window.waitForFunction(
-    (targetUrl) => document.querySelector(".paneActive webview")?.getURL?.() === targetUrl,
-    secondUrl,
-    { timeout: 15_000 }
-  );
+  await window.waitForFunction(activeBrowserUrlMatches, secondUrl, { timeout: 15_000 });
   log("ok browser reload");
 
   const paneCountBeforeBrowserSplit = await window.locator(".pane").count();

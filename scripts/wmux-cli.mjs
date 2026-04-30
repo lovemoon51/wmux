@@ -30,6 +30,7 @@ function printUsage() {
   wmux send-key <key> [--surface <id>] [--json]
   wmux notify --title <title> [--body <body>] [--json]
   wmux clear-status [--workspace <id>] [--json]
+  wmux status list [--workspace <id>] [--json]
   wmux browser navigate <url> [--surface <id>] [--create] [--wait load|domcontentloaded|none] [--timeout <ms>] [--json]
   wmux browser open <url> [--json]
   wmux browser list [--json]
@@ -289,6 +290,20 @@ function createRequest() {
     };
   }
 
+  if (command === "status" || command === "list-status") {
+    const statusCommand = command === "status" ? args[1] : "list";
+    if (statusCommand !== "list") {
+      throw cliError(`未知 status 命令：${statusCommand ?? ""}`);
+    }
+
+    return {
+      method: "status.list",
+      params: {
+        ...(parseOption("--workspace") ? { workspaceId: parseOption("--workspace") } : {})
+      }
+    };
+  }
+
   if (command === "browser") {
     return createBrowserRequest();
   }
@@ -462,6 +477,15 @@ function printResult(result) {
 
   if (command === "clear-status") {
     console.log(`cleared ${result?.workspaceId ?? "workspace"}`);
+    return;
+  }
+
+  if (command === "status" || command === "list-status") {
+    for (const item of result?.statuses ?? []) {
+      const activePrefix = item.active ? "*" : " ";
+      const notice = item.notice ? `\t${item.notice}` : "";
+      console.log(`${activePrefix} ${item.name}\t${item.status}${notice}`);
+    }
   }
 }
 

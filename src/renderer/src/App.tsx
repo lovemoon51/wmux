@@ -57,6 +57,7 @@ import type {
   SocketRpcResponse,
   SocketSecurityMode,
   SocketSecuritySettings,
+  StatusListParams,
   Surface,
   WmuxCommandConfig,
   WmuxLayoutConfig,
@@ -765,6 +766,7 @@ const socketCapabilities: SocketRpcMethod[] = [
   "surface.sendKey",
   "status.notify",
   "status.clear",
+  "status.list",
   "browser.navigate",
   "browser.click",
   "browser.fill",
@@ -1983,6 +1985,26 @@ export function App(): ReactElement {
           )
         );
         window.wmux?.socket.respond(createSocketSuccessResponse(request.id, { workspaceId: targetWorkspaceId, status: "idle" }));
+        return;
+      }
+
+      if (request.method === "status.list") {
+        const params = (request.params ?? {}) as Partial<StatusListParams>;
+        const summaries = createWorkspaceSummaries(currentWorkspaces, currentActiveWorkspaceId);
+        const statuses = params.workspaceId
+          ? summaries.filter((workspace) => workspace.id === params.workspaceId)
+          : summaries;
+
+        if (params.workspaceId && statuses.length === 0) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "NOT_FOUND", "找不到 workspace", {
+              workspaceId: params.workspaceId
+            })
+          );
+          return;
+        }
+
+        window.wmux?.socket.respond(createSocketSuccessResponse(request.id, { statuses }));
         return;
       }
 
