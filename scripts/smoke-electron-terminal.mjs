@@ -329,9 +329,12 @@ async function navigateActiveBrowser(activePane, url) {
   const address = activePane.locator(".surfaceBodyFrameActive .browserSurface input[aria-label='Browser address']");
   await address.waitFor({ timeout: 15_000 });
   await address.fill(url);
+  await address.evaluate((input) => input.dispatchEvent(new Event("input", { bubbles: true })));
+  await address.evaluate((input) => input.blur());
   await address.evaluate((input) => {
-    input.form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    input.form?.requestSubmit();
   });
+  await address.waitFor({ timeout: 15_000 });
 }
 
 function activeBrowserUrlMatches(targetUrl) {
@@ -386,6 +389,19 @@ async function runCliCommand(args) {
     timeout: 10_000
   });
   return `${stdout}${stderr}`.trim();
+}
+
+async function runCliCommandFailure(args) {
+  try {
+    await runCliCommand(args);
+  } catch (error) {
+    return {
+      code: error.code,
+      output: `${error.stdout ?? ""}${error.stderr ?? ""}`.trim()
+    };
+  }
+
+  throw new Error(`wmux command unexpectedly succeeded: ${args.join(" ")}`);
 }
 
 async function runCliSocketSmoke(window) {
@@ -488,6 +504,16 @@ async function runCliSocketSmoke(window) {
     throw new Error(`wmux status list --json did not include the active notice: ${statusListJsonOutput}`);
   }
   log("ok wmux status list");
+
+  const missingWorkspace = await runCliCommandFailure(["status", "list", "--workspace", "workspace:missing"]);
+  if (
+    missingWorkspace.code !== 1 ||
+    !missingWorkspace.output.includes("NOT_FOUND") ||
+    !missingWorkspace.output.includes("wmux list-workspaces")
+  ) {
+    throw new Error(`wmux NOT_FOUND hint was not clear: ${JSON.stringify(missingWorkspace)}`);
+  }
+  log("ok wmux not-found hint");
 
   const clearOutput = await runCliCommand(["clear-status"]);
   if (!clearOutput.includes("cleared")) {

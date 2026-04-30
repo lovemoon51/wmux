@@ -421,6 +421,36 @@ function writeFileAndPrint(path, content) {
   console.log(outputPath);
 }
 
+function printErrorHint(error) {
+  if (error?.code === "UNAUTHORIZED") {
+    const mode = error?.details?.securityMode ? ` 当前安全模式：${error.details.securityMode}。` : "";
+    console.error(`请在 wmux 内 terminal 运行，或显式设置 WMUX_SOCKET_TOKEN。${mode}`);
+    return;
+  }
+
+  if (error?.code === "NOT_FOUND") {
+    const details = error?.details ?? {};
+    if (details.workspaceId) {
+      console.error(`未找到 workspace：${details.workspaceId}。可先运行 wmux list-workspaces 查看可用 workspace。`);
+      return;
+    }
+    if (details.surfaceId) {
+      console.error(`未找到 surface：${details.surfaceId}。可先运行 wmux browser list 查看可用 browser surface。`);
+      return;
+    }
+    if (details.paneId) {
+      console.error(`未找到 pane：${details.paneId}。可先运行 wmux identify --json 查看当前 pane。`);
+      return;
+    }
+    console.error("目标不存在。可先运行 wmux identify --json 或 wmux list-workspaces 查看当前上下文。");
+    return;
+  }
+
+  if (error?.code === "METHOD_NOT_FOUND") {
+    console.error("当前 wmux 版本不支持该 socket 方法。可运行 wmux capabilities 查看可用方法。");
+  }
+}
+
 function printResult(result) {
   if (jsonOutput) {
     console.log(JSON.stringify(result, null, 2));
@@ -499,10 +529,7 @@ try {
     console.error(error.code);
   }
   console.error(error instanceof Error ? error.message : String(error));
-  if (error?.code === "UNAUTHORIZED") {
-    const mode = error?.details?.securityMode ? ` 当前安全模式：${error.details.securityMode}。` : "";
-    console.error(`请在 wmux 内 terminal 运行，或显式设置 WMUX_SOCKET_TOKEN。${mode}`);
-  }
+  printErrorHint(error);
   const candidates = error?.details?.candidates;
   if (error?.code === "AMBIGUOUS_TARGET" && Array.isArray(candidates) && candidates.length > 0) {
     console.error("可用 browser surfaces：");
