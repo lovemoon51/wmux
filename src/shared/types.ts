@@ -85,6 +85,7 @@ export type SocketRpcMethod =
   | "workspace.close"
   | "workspace.rename"
   | "surface.list"
+  | "surface.createTerminal"
   | "surface.focus"
   | "surface.sendText"
   | "surface.sendKey"
@@ -197,6 +198,12 @@ export type WorkspaceRenameParams = {
 
 export type SurfaceListParams = {
   workspaceId?: string;
+};
+
+export type SurfaceCreateTerminalParams = {
+  paneId?: string;
+  name?: string;
+  cwd?: string;
 };
 
 export type SurfaceFocusParams = {

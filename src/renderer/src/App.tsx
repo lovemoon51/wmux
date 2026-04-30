@@ -59,6 +59,7 @@ import type {
   SocketSecuritySettings,
   StatusListParams,
   Surface,
+  SurfaceCreateTerminalParams,
   SurfaceFocusParams,
   SurfaceListParams,
   SurfaceSummary,
@@ -156,13 +157,14 @@ function restoreBrowserSessions(sessions: PersistedAppState["browserSessions"]):
   });
 }
 
-function createTerminalSurface(): Surface {
+function createTerminalSurface(options: { name?: string; cwd?: string } = {}): Surface {
   const number = nextSurfaceNumber++;
+  const cwd = options.cwd ? resolveWorkspaceCwd(options.cwd) : undefined;
   return {
     id: `surface-terminal-${Date.now()}-${number}`,
     type: "terminal",
-    name: `Terminal ${number}`,
-    subtitle: "PowerShell",
+    name: options.name?.trim() || `Terminal ${number}`,
+    subtitle: cwd ?? "PowerShell",
     status: "idle"
   };
 }
@@ -775,6 +777,7 @@ const socketCapabilities: SocketRpcMethod[] = [
   "workspace.close",
   "workspace.rename",
   "surface.list",
+  "surface.createTerminal",
   "surface.focus",
   "surface.sendText",
   "surface.sendKey",
@@ -2079,6 +2082,72 @@ export function App(): ReactElement {
         window.wmux?.socket.respond(
           createSocketSuccessResponse(request.id, {
             surfaces: createSurfaceSummaries(currentWorkspaces, currentActiveWorkspaceId, params.workspaceId)
+          })
+        );
+        return;
+      }
+
+      if (request.method === "surface.createTerminal") {
+        const params = (request.params ?? {}) as Partial<SurfaceCreateTerminalParams>;
+        if (params.paneId !== undefined && (typeof params.paneId !== "string" || !params.paneId.trim())) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "BAD_REQUEST", "surface.createTerminal paneId 不能为空")
+          );
+          return;
+        }
+        if (params.name !== undefined && (typeof params.name !== "string" || !params.name.trim())) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "BAD_REQUEST", "surface.createTerminal name 不能为空")
+          );
+          return;
+        }
+        if (params.cwd !== undefined && (typeof params.cwd !== "string" || !params.cwd.trim())) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "BAD_REQUEST", "surface.createTerminal cwd 不能为空")
+          );
+          return;
+        }
+
+        const paneId = params.paneId?.trim() || currentWorkspace.activePaneId;
+        const pane = currentWorkspace.panes[paneId];
+        if (!pane) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "NOT_FOUND", "找不到 pane", {
+              paneId
+            })
+          );
+          return;
+        }
+
+        const surface = createTerminalSurface({ name: params.name, cwd: params.cwd });
+        setWorkspaces((items) =>
+          items.map((workspace) =>
+            workspace.id === currentWorkspace.id
+              ? {
+                  ...workspace,
+                  activePaneId: paneId,
+                  panes: {
+                    ...workspace.panes,
+                    [paneId]: {
+                      ...pane,
+                      surfaceIds: [...pane.surfaceIds, surface.id],
+                      activeSurfaceId: surface.id
+                    }
+                  },
+                  surfaces: {
+                    ...workspace.surfaces,
+                    [surface.id]: surface
+                  }
+                }
+              : workspace
+          )
+        );
+
+        window.wmux?.socket.respond(
+          createSocketSuccessResponse(request.id, {
+            workspaceId: currentWorkspace.id,
+            paneId,
+            surface
           })
         );
         return;

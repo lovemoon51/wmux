@@ -483,6 +483,7 @@ async function runCliSocketSmoke(window) {
     "workspace.close",
     "workspace.rename",
     "surface.list",
+    "surface.createTerminal",
     "surface.focus",
     "surface.sendKey",
     "status.clear",
@@ -611,6 +612,31 @@ async function runCliSocketSmoke(window) {
     throw new Error(`wmux surface focus did not restore surface-agent: ${focusedAgentOutput}`);
   }
   log("ok wmux surface focus");
+
+  const createTerminalOutput = await runCliCommand(["new-terminal", "--name", "CLI Terminal Smoke", "--cwd", "."]);
+  if (!createTerminalOutput.includes("created CLI Terminal Smoke")) {
+    throw new Error(`wmux new-terminal did not report created CLI Terminal Smoke: ${createTerminalOutput}`);
+  }
+  const createdTerminalOutput = await runCliCommand(["identify", "--json"]);
+  const createdTerminal = JSON.parse(createdTerminalOutput);
+  if (createdTerminal.surfaceType !== "terminal") {
+    throw new Error(`wmux new-terminal did not activate a terminal surface: ${createdTerminalOutput}`);
+  }
+  const surfaceAfterCreateOutput = await runCliCommand(["surface", "list", "--json"]);
+  const surfacesAfterCreate = JSON.parse(surfaceAfterCreateOutput);
+  if (
+    !surfacesAfterCreate.surfaces?.some(
+      (surface) => surface.surfaceId === createdTerminal.surfaceId && surface.name === "CLI Terminal Smoke" && surface.active
+    )
+  ) {
+    throw new Error(`wmux surface list did not include active CLI Terminal Smoke: ${surfaceAfterCreateOutput}`);
+  }
+  await runCliCommand(["send", "Write-Output WMUX_CLI_NEW_TERMINAL\n"]);
+  await window.waitForFunction(() => document.body.textContent?.includes("WMUX_CLI_NEW_TERMINAL"), null, {
+    timeout: 15_000
+  });
+  await runCliCommand(["surface", "focus", "--surface", "surface-agent"]);
+  log("ok wmux new-terminal");
 
   await window.locator('button.surfaceTab[aria-label="Codex Agent"]').click();
   await window.waitForSelector(".paneActive .surfaceBodyFrameActive .terminalHost .xterm textarea", {

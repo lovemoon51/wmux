@@ -30,6 +30,7 @@ function printUsage() {
   wmux select-workspace --workspace <id> [--json]
   wmux close-workspace --workspace <id> [--json]
   wmux rename-workspace --workspace <id> --name <name> [--json]
+  wmux new-terminal [--pane <id>] [--name <name>] [--cwd <path>] [--json]
   wmux surface list [--workspace <id>] [--json]
   wmux surface focus --surface <id> [--json]
   wmux send <text> [--json]
@@ -311,6 +312,29 @@ function createRequest() {
       params: {
         workspaceId,
         name
+      }
+    };
+  }
+
+  if (command === "new-terminal") {
+    const paneId = parseOption("--pane");
+    const name = parseOption("--name");
+    const cwd = parseOption("--cwd");
+    if (paneId !== undefined && (!paneId || paneId.startsWith("--"))) {
+      throw cliError("new-terminal 的 --pane 需要 pane id");
+    }
+    if (name !== undefined && (!name || name.startsWith("--"))) {
+      throw cliError("new-terminal 的 --name 需要名称");
+    }
+    if (cwd !== undefined && (!cwd || cwd.startsWith("--"))) {
+      throw cliError("new-terminal 的 --cwd 需要路径");
+    }
+    return {
+      method: "surface.createTerminal",
+      params: {
+        ...(paneId ? { paneId } : {}),
+        ...(name ? { name } : {}),
+        ...(cwd ? { cwd } : {})
       }
     };
   }
@@ -604,6 +628,11 @@ function printResult(result) {
 
   if (command === "rename-workspace") {
     console.log(`renamed ${result?.workspaceName ?? result?.workspaceId ?? "workspace"}`);
+    return;
+  }
+
+  if (command === "new-terminal") {
+    console.log(`created ${result?.surface?.name ?? result?.surface?.id ?? "terminal"}`);
     return;
   }
 
