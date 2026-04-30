@@ -54,7 +54,7 @@
 
 - [x] 默认 socket 模式不允许任意本地进程控制终端。
 - [x] `allowAll` 模式有明确警告。
-- [ ] custom command 首次运行需确认或信任目录。
+- [x] custom command 首次运行需确认或信任目录。
 - [x] socket token 不写入日志。
 - [x] Browser automation 写文件操作需要明确路径。
 

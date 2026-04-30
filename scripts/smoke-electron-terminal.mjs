@@ -680,6 +680,8 @@ async function runCommandPaletteSmoke(window) {
   await commandSearch.press("ArrowDown");
   await commandSearch.press("ArrowUp");
   await commandSearch.press("Enter");
+  await window.getByLabel("Confirm project command").waitFor({ timeout: 15_000 });
+  await window.getByRole("button", { name: "Run project command" }).click();
   await window.getByLabel("Command palette").waitFor({ state: "detached", timeout: 15_000 });
   log("ok command palette keyboard");
   await window.waitForFunction(() => document.body.textContent?.includes("WMUX_COMMAND_SMOKE"), null, {
@@ -690,6 +692,7 @@ async function runCommandPaletteSmoke(window) {
   await window.getByRole("button", { name: "Command" }).click();
   await commandSearch.fill("dev layout");
   await commandSearch.press("Enter");
+  await window.getByLabel("Confirm project command").waitFor({ state: "detached", timeout: 15_000 });
   await window.getByRole("heading", { name: "Command Layout Smoke" }).waitFor({ timeout: 15_000 });
   await window.waitForFunction(() => document.querySelectorAll(".pane").length >= 2, null, { timeout: 15_000 });
   await window.waitForFunction(

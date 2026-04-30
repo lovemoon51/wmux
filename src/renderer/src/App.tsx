@@ -1473,6 +1473,8 @@ export function App(): ReactElement {
   const [commandQuery, setCommandQuery] = useState("");
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [pendingTerminalCommands, setPendingTerminalCommands] = useState<PendingTerminalCommand[]>([]);
+  const [trustedCommandConfigPath, setTrustedCommandConfigPath] = useState<string | null>(null);
+  const [pendingCommandConfirmation, setPendingCommandConfirmation] = useState<WmuxCommandConfig | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [securitySettings, setSecuritySettings] = useState<SocketSecuritySettings | null>(null);
   const [securityModeDraft, setSecurityModeDraft] = useState<SocketSecurityMode>("wmuxOnly");
@@ -1760,12 +1762,36 @@ export function App(): ReactElement {
     setPendingTerminalCommands((items) => [...items, ...buildResult.terminalCommands]);
   };
 
-  const runProjectCommand = (command: WmuxCommandConfig): void => {
+  const executeProjectCommand = (command: WmuxCommandConfig): void => {
     if (command.workspace) {
       runWorkspaceCommand(command);
     } else {
       runSimpleCommand(command);
     }
+  };
+
+  const runProjectCommand = (command: WmuxCommandConfig): void => {
+    const configPath = projectConfig?.path;
+    if (projectConfig?.found && configPath && trustedCommandConfigPath !== configPath) {
+      setPendingCommandConfirmation(command);
+      return;
+    }
+
+    executeProjectCommand(command);
+    closeCommandPalette();
+  };
+
+  const confirmProjectCommand = (): void => {
+    const command = pendingCommandConfirmation;
+    if (!command) {
+      return;
+    }
+
+    if (projectConfig?.path) {
+      setTrustedCommandConfigPath(projectConfig.path);
+    }
+    executeProjectCommand(command);
+    setPendingCommandConfirmation(null);
     closeCommandPalette();
   };
 
@@ -2514,7 +2540,56 @@ export function App(): ReactElement {
         onRun={runProjectCommand}
         onSelectedIndexChange={setSelectedCommandIndex}
       />
+      <ProjectCommandConfirmDialog
+        command={pendingCommandConfirmation}
+        configPath={projectConfig?.path}
+        onCancel={() => setPendingCommandConfirmation(null)}
+        onConfirm={confirmProjectCommand}
+      />
     </main>
+  );
+}
+
+function ProjectCommandConfirmDialog({
+  command,
+  configPath,
+  onCancel,
+  onConfirm
+}: {
+  command: WmuxCommandConfig | null;
+  configPath?: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}): ReactElement | null {
+  if (!command) {
+    return null;
+  }
+
+  return (
+    <div className="confirmOverlay" role="presentation" onMouseDown={onCancel}>
+      <section
+        className="confirmDialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Confirm project command"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="confirmDialogHeader">
+          <Command size={18} />
+          <h2>Run project command?</h2>
+        </div>
+        <p>{command.name}</p>
+        <p className="confirmDialogMeta">{configPath ?? "wmux.json"}</p>
+        <div className="confirmDialogActions">
+          <button className="toolbarButton" type="button" onClick={onCancel}>
+            Cancel
+          </button>
+          <button className="commandButton" type="button" onClick={onConfirm}>
+            Run project command
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 
