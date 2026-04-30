@@ -8,6 +8,7 @@
 - [x] 可在 workspace 内创建 terminal surface。
 - [x] terminal 支持交互 shell。
 - [x] terminal resize 后 shell 尺寸正确。
+- [x] terminal 支持拖选文本、右键复制选区、无选区时右键粘贴。
 - [x] terminal 默认使用 PowerShell，并支持选择可用的 shell profile。
 - [x] terminal surface 支持新增、切换、关闭 tab。
 - [x] 可水平和垂直分屏。
@@ -76,5 +77,5 @@
 
 ## 6. Smoke 覆盖依据
 
-- `npm run smoke:terminal` 覆盖 workspace CRUD、sidebar branch/port/notice/status、split CRUD、surface tab、terminal 输入/clear/resize/profile、browser CRUD、拖拽分屏、session restore、command palette、custom command 首次确认/取消、workspace layout、快捷键和性能 smoke。
+- `npm run smoke:terminal` 覆盖 workspace CRUD、sidebar branch/port/notice/status、split CRUD、surface tab、terminal 输入/clear/resize/profile、右键复制粘贴、browser CRUD、拖拽分屏、session restore、command palette、custom command 首次确认/取消、workspace layout、快捷键和性能 smoke。
 - `npm run smoke:browser` 覆盖 socket 安全模式、terminal 链接内置 browser、browser automation navigate/list/snapshot/selector snapshot/fill/click/eval/state inspection/screenshot、ambiguous target 和写文件路径校验。
