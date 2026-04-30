@@ -279,6 +279,39 @@ async function runCompactLayoutSmoke(window) {
   log("ok compact layout");
 }
 
+async function runWorkspaceSwitchLatencySmoke(window) {
+  log("workspace switch latency");
+  await window.waitForFunction(() => document.querySelectorAll(".workspaceItem").length >= 4, null, {
+    timeout: 15_000
+  });
+
+  const workspaceNames = await window.evaluate(() =>
+    [...document.querySelectorAll(".workspaceSelect")]
+      .map((element) => element.getAttribute("aria-label")?.replace(/^Open workspace /, ""))
+      .filter(Boolean)
+      .slice(0, 4)
+  );
+  if (workspaceNames.length < 4) {
+    throw new Error(`Expected at least 4 workspaces for switch latency smoke, got ${workspaceNames.length}`);
+  }
+
+  const samples = [];
+  for (const workspaceName of [...workspaceNames, workspaceNames[0]]) {
+    const startedAt = Date.now();
+    await window.getByLabel(`Open workspace ${workspaceName}`).click();
+    await window.getByRole("heading", { name: workspaceName }).waitFor({ timeout: 15_000 });
+    samples.push(Date.now() - startedAt);
+  }
+
+  const maxMs = Math.max(...samples);
+  const totalMs = samples.reduce((sum, value) => sum + value, 0);
+  if (maxMs > 1_500 || totalMs > 4_000) {
+    throw new Error(`Workspace switch latency exceeded threshold: ${JSON.stringify({ samples, maxMs, totalMs })}`);
+  }
+
+  log(`ok workspace switch latency ${JSON.stringify({ samples, maxMs, totalMs })}`);
+}
+
 async function runTerminalCommand(window, command, expectedText) {
   log(`run ${command}`);
   await window.locator(".paneActive .surfaceBodyFrameActive .terminalHost").click();
@@ -702,6 +735,7 @@ try {
   await runSettingsSmoke(window);
   await runKeyboardShortcutSmoke(window);
   await runCompactLayoutSmoke(window);
+  await runWorkspaceSwitchLatencySmoke(window);
   await runCliSocketSmoke(window);
   await runWorkspaceCrud(window);
   await runSplitCrud(window);
