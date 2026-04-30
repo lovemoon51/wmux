@@ -87,6 +87,13 @@ type BrowserWebviewElement = HTMLElement & {
   setZoomFactor?: (factor: number) => void;
 };
 
+type BrowserLoadFailureEvent = Event & {
+  errorCode?: number;
+  errorDescription?: string;
+  isMainFrame?: boolean;
+  validatedURL?: string;
+};
+
 type BrowserRuntime = {
   surfaceId: string;
   runtimeId: string;
@@ -105,6 +112,13 @@ type DraggedSurfacePayload = {
 type PendingTerminalCommand = {
   surfaceId: string;
   command: string;
+};
+
+type BrowserSurfaceTarget = {
+  workspaceId: string;
+  paneId: string;
+  surface: Surface;
+  isNew: boolean;
 };
 
 type WorkspaceCommandBuildResult = {
@@ -754,6 +768,16 @@ function getBrowserSurfaces(workspace: Workspace): Array<{ surface: Surface; pan
   );
 }
 
+function isIgnorableBrowserLoadFailure(event: BrowserLoadFailureEvent, expectedUrl: string): boolean {
+  return (
+    event.errorCode === -3 ||
+    event.errorDescription === "ERR_ABORTED" ||
+    event.isMainFrame === false ||
+    event.validatedURL === "about:blank" ||
+    event.validatedURL === expectedUrl
+  );
+}
+
 async function createBrowserSurfaceSummaries(
   workspaces: Workspace[],
   activeWorkspaceId: string,
@@ -943,6 +967,84 @@ function createBrowserSurfaceInWorkspace(
           }
         : workspace
     )
+  };
+}
+
+function findOrCreateBrowserSurfaceForWorkspace(workspace: Workspace, url: string): { workspace: Workspace; target: BrowserSurfaceTarget } {
+  const normalizedUrl = normalizeBrowserUrl(url);
+  const activePane = workspace.panes[workspace.activePaneId];
+  const activeSurface = activePane ? workspace.surfaces[activePane.activeSurfaceId] : undefined;
+
+  if (activePane && activeSurface?.type === "browser") {
+    return {
+      workspace: {
+        ...workspace,
+        panes: {
+          ...workspace.panes,
+          [activePane.id]: {
+            ...activePane,
+            activeSurfaceId: activeSurface.id
+          }
+        }
+      },
+      target: { workspaceId: workspace.id, paneId: activePane.id, surface: activeSurface, isNew: false }
+    };
+  }
+
+  const browserSurfaces = Object.values(workspace.panes).flatMap((pane) =>
+    pane.surfaceIds
+      .map((surfaceId) => workspace.surfaces[surfaceId])
+      .filter((surface): surface is Surface => Boolean(surface) && surface.type === "browser")
+      .map((surface) => ({ pane, surface }))
+  );
+
+  if (browserSurfaces.length === 1) {
+    const { pane, surface } = browserSurfaces[0];
+    return {
+      workspace: {
+        ...workspace,
+        activePaneId: pane.id,
+        panes: {
+          ...workspace.panes,
+          [pane.id]: {
+            ...pane,
+            activeSurfaceId: surface.id
+          }
+        }
+      },
+      target: { workspaceId: workspace.id, paneId: pane.id, surface, isNew: false }
+    };
+  }
+
+  if (!activePane) {
+    throw createBrowserError("INVALID_STATE", "当前 workspace 没有可用 pane");
+  }
+
+  const surface = { ...createBrowserSurface(), subtitle: normalizedUrl };
+  browserSessions.set(surface.id, {
+    history: [normalizedUrl],
+    historyIndex: 0,
+    url: normalizedUrl
+  });
+
+  return {
+    workspace: {
+      ...workspace,
+      activePaneId: activePane.id,
+      panes: {
+        ...workspace.panes,
+        [activePane.id]: {
+          ...activePane,
+          surfaceIds: [...activePane.surfaceIds, surface.id],
+          activeSurfaceId: surface.id
+        }
+      },
+      surfaces: {
+        ...workspace.surfaces,
+        [surface.id]: surface
+      }
+    },
+    target: { workspaceId: workspace.id, paneId: activePane.id, surface, isNew: true }
   };
 }
 
@@ -1772,6 +1874,77 @@ export function App(): ReactElement {
     });
   };
 
+  const handleOpenTerminalUrl = (url: string): void => {
+    const normalizedUrl = normalizeBrowserUrl(url);
+    const currentWorkspaces = workspacesRef.current;
+    const targetWorkspaceId = activeWorkspaceIdRef.current;
+    const targetWorkspace = currentWorkspaces.find((workspace) => workspace.id === targetWorkspaceId) ?? currentWorkspaces[0];
+    if (!targetWorkspace) {
+      return;
+    }
+
+    let openResult: { workspace: Workspace; target: BrowserSurfaceTarget };
+    try {
+      openResult = findOrCreateBrowserSurfaceForWorkspace(targetWorkspace, normalizedUrl);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setWorkspaces((items) =>
+        items.map((workspace) =>
+          workspace.id === targetWorkspace.id
+            ? {
+                ...workspace,
+                status: "error",
+                notice: `Browser link failed: ${message}`
+              }
+            : workspace
+        )
+      );
+      return;
+    }
+
+    setWorkspaces((currentWorkspaces) =>
+      currentWorkspaces.map((workspace) => {
+        if (workspace.id !== openResult.target.workspaceId) {
+          return workspace;
+        }
+
+        return {
+          ...openResult.workspace,
+          status: "running",
+          notice: `Opening terminal link: ${normalizedUrl}`,
+          surfaces: {
+            ...openResult.workspace.surfaces,
+            [openResult.target.surface.id]: {
+              ...openResult.workspace.surfaces[openResult.target.surface.id],
+              subtitle: normalizedUrl
+            }
+          }
+        };
+      })
+    );
+
+    window.setTimeout(() => {
+      const surfaceId = openResult.target.surface.id;
+
+      void waitForBrowserRuntime(surfaceId, 10_000)
+        .then((runtime) => runtime.navigate(normalizedUrl, "domcontentloaded", 10_000))
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          setWorkspaces((currentWorkspaces) =>
+            currentWorkspaces.map((workspace) =>
+              workspace.id === activeWorkspaceIdRef.current
+                ? {
+                    ...workspace,
+                    status: "error",
+                    notice: `Browser link failed: ${message}`
+                  }
+                : workspace
+            )
+          );
+        });
+    }, 0);
+  };
+
   const handleSelectSurface = (paneId: string, surfaceId: string): void => {
     updateActiveWorkspace((workspace) => {
       const pane = workspace.panes[paneId];
@@ -2017,6 +2190,7 @@ export function App(): ReactElement {
             onClosePane={handleClosePane}
             onDropSurfaceToPane={handleDropSurfaceToPane}
             onUpdateSurfaceSubtitle={handleUpdateSurfaceSubtitle}
+            onOpenTerminalUrl={handleOpenTerminalUrl}
           />
         </div>
       </section>
@@ -2405,7 +2579,8 @@ function LayoutRenderer({
   onResizeSplit,
   onClosePane,
   onDropSurfaceToPane,
-  onUpdateSurfaceSubtitle
+  onUpdateSurfaceSubtitle,
+  onOpenTerminalUrl
 }: {
   workspace: Workspace;
   node: LayoutNode;
@@ -2418,6 +2593,7 @@ function LayoutRenderer({
   onClosePane: (paneId: string) => void;
   onDropSurfaceToPane: (targetPaneId: string, edge: SplitDropEdge, payload: DraggedSurfacePayload) => void;
   onUpdateSurfaceSubtitle: (surfaceId: string, subtitle: string) => void;
+  onOpenTerminalUrl: (url: string) => void;
 }): ReactElement {
   if (node.type === "pane") {
     return (
@@ -2432,6 +2608,7 @@ function LayoutRenderer({
         onClosePane={onClosePane}
         onDropSurfaceToPane={onDropSurfaceToPane}
         onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle}
+        onOpenTerminalUrl={onOpenTerminalUrl}
       />
     );
   }
@@ -2457,6 +2634,7 @@ function LayoutRenderer({
         onClosePane={onClosePane}
         onDropSurfaceToPane={onDropSurfaceToPane}
         onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle}
+        onOpenTerminalUrl={onOpenTerminalUrl}
       />
       <SplitHandle node={node} onResizeSplit={onResizeSplit} />
       <LayoutRenderer
@@ -2471,6 +2649,7 @@ function LayoutRenderer({
         onClosePane={onClosePane}
         onDropSurfaceToPane={onDropSurfaceToPane}
         onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle}
+        onOpenTerminalUrl={onOpenTerminalUrl}
       />
     </div>
   );
@@ -2532,7 +2711,8 @@ function PaneView({
   onActivatePane,
   onClosePane,
   onDropSurfaceToPane,
-  onUpdateSurfaceSubtitle
+  onUpdateSurfaceSubtitle,
+  onOpenTerminalUrl
 }: {
   workspace: Workspace;
   paneId: string;
@@ -2544,6 +2724,7 @@ function PaneView({
   onClosePane: (paneId: string) => void;
   onDropSurfaceToPane: (targetPaneId: string, edge: SplitDropEdge, payload: DraggedSurfacePayload) => void;
   onUpdateSurfaceSubtitle: (surfaceId: string, subtitle: string) => void;
+  onOpenTerminalUrl: (url: string) => void;
 }): ReactElement {
   const pane = workspace.panes[paneId];
   const surfaces = pane.surfaceIds.map((id) => workspace.surfaces[id]);
@@ -2611,6 +2792,7 @@ function PaneView({
               cwd={workspace.cwd}
               shellProfile={shellProfile}
               onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle}
+              onOpenTerminalUrl={onOpenTerminalUrl}
             />
           </div>
         ))}
@@ -2695,18 +2877,20 @@ function SurfaceBody({
   surface,
   cwd,
   shellProfile,
-  onUpdateSurfaceSubtitle
+  onUpdateSurfaceSubtitle,
+  onOpenTerminalUrl
 }: {
   surface: Surface;
   cwd: string;
   shellProfile: ShellProfile;
   onUpdateSurfaceSubtitle: (surfaceId: string, subtitle: string) => void;
+  onOpenTerminalUrl: (url: string) => void;
 }): ReactElement {
   if (surface.type === "browser") {
     return <BrowserSurface surface={surface} onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle} />;
   }
 
-  return <TerminalSurface surface={surface} cwd={cwd} shell={shellProfile} />;
+  return <TerminalSurface surface={surface} cwd={cwd} shell={shellProfile} onOpenUrl={onOpenTerminalUrl} />;
 }
 
 function normalizeBrowserUrl(value: string): string {
@@ -2846,23 +3030,29 @@ function BrowserSurface({
     applyBrowserZoom();
   }, [applyBrowserZoom, viewportSize?.width, url]);
 
-  const navigate = (nextUrl: string): void => {
-    const normalizedUrl = normalizeBrowserUrl(nextUrl);
-    const nextHistory = browserHistoryRef.current.slice(0, browserHistoryIndexRef.current + 1);
-    if (nextHistory[nextHistory.length - 1] !== normalizedUrl) {
-      nextHistory.push(normalizedUrl);
-    }
-    browserHistoryRef.current = nextHistory;
-    browserHistoryIndexRef.current = nextHistory.length - 1;
-    desiredUrlRef.current = normalizedUrl;
-    setUrl(normalizedUrl);
-    setDraftUrl(normalizedUrl);
-    setCanGoBack(browserHistoryIndexRef.current > 0);
-    setCanGoForward(false);
-    persistBrowserSession(normalizedUrl);
-    onUpdateSurfaceSubtitle(surface.id, normalizedUrl);
-    webviewRef.current?.loadURL?.(normalizedUrl);
-  };
+  const navigate = useCallback(
+    (nextUrl: string): void => {
+      const normalizedUrl = normalizeBrowserUrl(nextUrl);
+      const nextHistory = browserHistoryRef.current.slice(0, browserHistoryIndexRef.current + 1);
+      if (nextHistory[nextHistory.length - 1] !== normalizedUrl) {
+        nextHistory.push(normalizedUrl);
+      }
+      browserHistoryRef.current = nextHistory;
+      browserHistoryIndexRef.current = nextHistory.length - 1;
+      desiredUrlRef.current = normalizedUrl;
+      setUrl(normalizedUrl);
+      setDraftUrl(normalizedUrl);
+      setCanGoBack(browserHistoryIndexRef.current > 0);
+      setCanGoForward(false);
+      persistBrowserSession(normalizedUrl);
+      onUpdateSurfaceSubtitle(surface.id, normalizedUrl);
+      const currentUrl = webviewRef.current?.getURL?.();
+      if (currentUrl !== normalizedUrl) {
+        webviewRef.current?.loadURL?.(normalizedUrl);
+      }
+    },
+    [onUpdateSurfaceSubtitle, persistBrowserSession, surface.id]
+  );
 
   const navigateBrowserRuntime = useCallback(
     (nextUrl: string, waitUntil: BrowserWaitUntil, timeoutMs: number): Promise<string> => {
@@ -2890,10 +3080,13 @@ function BrowserSurface({
           callback();
         };
         const handleFailLoad = (event: Event): void => {
-          const failure = event as Event & { errorDescription?: string };
+          const failure = event as BrowserLoadFailureEvent;
+          if (isIgnorableBrowserLoadFailure(failure, normalizedUrl)) {
+            return;
+          }
           settle(() =>
             reject(
-              createBrowserError("BROWSER_ERROR", failure.errorDescription ?? "browser navigation failed", {
+              createBrowserError("BROWSER_ERROR", failure.errorDescription || "browser navigation failed", {
                 surfaceId: surface.id,
                 url: normalizedUrl
               })
@@ -2931,7 +3124,7 @@ function BrowserSurface({
         }
       });
     },
-    [surface.id]
+    [navigate, surface.id]
   );
 
   useEffect(() => {

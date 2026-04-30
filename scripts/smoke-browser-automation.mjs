@@ -2,6 +2,7 @@ import { _electron as electron } from "playwright";
 import electronPath from "electron";
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -90,7 +91,34 @@ const smokeHtml = encodeURIComponent(`<!doctype html>
 </main>`);
 const smokeUrl = `data:text/html,${smokeHtml}`;
 
+async function startTerminalLinkServer() {
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    response.end("<!doctype html><title>WMUX Terminal Link</title><h1>WMUX_TERMINAL_LINK_BROWSER</h1>");
+  });
+
+  await new Promise((resolveListen, rejectListen) => {
+    server.once("error", rejectListen);
+    server.listen(0, "127.0.0.1", resolveListen);
+  });
+
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error(`terminal link server did not expose a port: ${JSON.stringify(address)}`);
+  }
+
+  return {
+    server,
+    url: `http://127.0.0.1:${address.port}/terminal-link`
+  };
+}
+
+async function closeServer(server) {
+  await new Promise((resolveClose) => server.close(resolveClose));
+}
+
 let app;
+let terminalLinkServer;
 
 try {
   app = await launchApp({ socketPath: allowAllSocketPath, securityMode: "allowAll", token: null });
@@ -118,6 +146,7 @@ try {
 
   app = await launchApp();
   await getReadyWindow(app);
+  await app.windows()[0].waitForTimeout(1_000);
 
   const noToken = await runCli(["ping"], { allowFailure: true, token: null });
   if (noToken.code !== 1 || !noToken.stderr.includes("UNAUTHORIZED")) {
@@ -149,7 +178,58 @@ try {
   }
   log("ok browser auth notify with token");
 
-  const navigate = parseJson((await runCli(["browser", "navigate", smokeUrl, "--create", "--json"])).stdout);
+  const terminalLink = await startTerminalLinkServer();
+  terminalLinkServer = terminalLink.server;
+  const terminalClickUrl = `${terminalLink.url}?source=terminal-click`;
+
+  const sendLink = await runCli(["send", `Write-Output "${terminalClickUrl}"\r`]);
+  if (!sendLink.stdout.includes("sent")) {
+    throw new Error(`send should write terminal link: ${JSON.stringify(sendLink)}`);
+  }
+  await app.windows()[0].waitForFunction(
+    (url) => Array.from(document.querySelectorAll(".xterm-rows > div")).some((element) => element.textContent?.includes(url)),
+    terminalClickUrl,
+    { timeout: 15_000 }
+  );
+  const terminalLinkClicked = await app.windows()[0].evaluate((url) => {
+    const row = Array.from(document.querySelectorAll(".xterm-rows > div")).find((element) =>
+      element.textContent?.includes(url)
+    );
+    if (!row) {
+      return false;
+    }
+    const rect = row.getBoundingClientRect();
+    row.dispatchEvent(
+      new globalThis.MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2
+      })
+    );
+    return true;
+  }, terminalClickUrl);
+  if (!terminalLinkClicked) {
+    throw new Error(`terminal link text was not visible: ${terminalClickUrl}`);
+  }
+  await app.windows()[0].waitForFunction(
+    (url) =>
+      Array.from(document.querySelectorAll("webview")).some((webview) => {
+        try {
+          const getURL = webview.getURL;
+          return typeof getURL === "function" && getURL.call(webview).startsWith(url);
+        } catch {
+          return false;
+        }
+      }),
+    terminalClickUrl,
+    { timeout: 15_000 }
+  );
+  log("ok browser terminal link opens internal browser");
+
+  const navigate = parseJson(
+    (await runCli(["browser", "navigate", smokeUrl, "--create", "--json"])).stdout
+  );
   if (!navigate.surfaceId || !navigate.url.startsWith("data:text/html")) {
     throw new Error(`navigate failed: ${JSON.stringify(navigate)}`);
   }
@@ -234,6 +314,9 @@ try {
   await window?.screenshot({ path: resolve(outputDir, "browser-automation-smoke-failure.png") }).catch(() => {});
   throw error;
 } finally {
+  if (terminalLinkServer) {
+    await closeServer(terminalLinkServer).catch(() => {});
+  }
   if (app) {
     await Promise.race([app.close(), new Promise((resolvePromise) => setTimeout(resolvePromise, 3_000))]);
   }

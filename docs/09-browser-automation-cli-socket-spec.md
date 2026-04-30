@@ -637,17 +637,18 @@ INTERNAL
 2. 使用独立 `WMUX_USER_DATA_DIR=output/playwright/wmux-browser-smoke-user-data`
 3. 使用独立 `WMUX_SOCKET_PATH`
 4. 启动 Electron 生产构建。
-5. CLI 调 `wmux browser navigate "data:text/html,..."`
-6. CLI 调 `wmux browser list --json`，断言包含当前 browser surface。
-7. CLI 调 `wmux browser snapshot --json`，断言包含页面标题和按钮。
-8. CLI 调 `wmux browser fill "#name" "wmux"`，再 `eval "document.querySelector('#name').value"`，断言为 `wmux`。
-9. CLI 调 `wmux browser click "#submit"`，断言页面显示 `clicked: wmux`。
-10. CLI 调 `wmux browser eval "document.body.dataset.clicked"`，断言为 `wmux`。
-11. CLI 调 `wmux browser screenshot --out output/playwright/browser-automation-smoke.png`，断言文件存在且大于 1KB。
-12. CLI 调 `wmux browser screenshot --base64 --json`，断言 `mimeType` 和 `base64` 存在。
-13. 创建第二个 browser surface 后调用 `wmux browser snapshot`，断言返回 `AMBIGUOUS_TARGET` 且 CLI 输出候选 `--surface <id>`；再用 `--surface` 精确指定并成功。
-14. 调用 `wmux browser click "#submit" --create`，断言 CLI exit code 为 `2`。
-15. 关闭 Electron，清理临时 userData。
+5. CLI 调 `wmux send "Write-Output \"http://127.0.0.1:<port>/terminal-link\"\r"`，点击 terminal 中的链接，断言内置 browser surface 打开该 URL。
+6. CLI 调 `wmux browser navigate "data:text/html,..."`。
+7. CLI 调 `wmux browser list --json`，断言包含当前 browser surface。
+8. CLI 调 `wmux browser snapshot --json`，断言包含页面标题和按钮。
+9. CLI 调 `wmux browser fill "#name" "wmux"`，再 `eval "document.querySelector('#name').value"`，断言为 `wmux`。
+10. CLI 调 `wmux browser click "#submit"`，断言页面显示 `clicked: wmux`。
+11. CLI 调 `wmux browser eval "document.body.dataset.clicked"`，断言为 `wmux`。
+12. CLI 调 `wmux browser screenshot --out output/playwright/browser-automation-smoke.png`，断言文件存在且大于 1KB。
+13. CLI 调 `wmux browser screenshot --base64 --json`，断言 `mimeType` 和 `base64` 存在。
+14. 创建第二个 browser surface 后调用 `wmux browser snapshot`，断言返回 `AMBIGUOUS_TARGET` 且 CLI 输出候选 `--surface <id>`；再用 `--surface` 精确指定并成功。
+15. 调用 `wmux browser click "#submit" --create`，断言 CLI exit code 为 `2`。
+16. 关闭 Electron，清理临时 userData。
 
 测试页面：
 
@@ -665,6 +666,7 @@ INTERNAL
 最小验收输出：
 
 ```text
+ok browser terminal link opens internal browser
 ok browser navigate
 ok browser list
 ok browser snapshot

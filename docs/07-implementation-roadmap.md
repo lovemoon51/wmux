@@ -86,7 +86,7 @@
 - 创建 browser surface。
 - URL toolbar。
 - back/forward/reload。
-- terminal 链接在 wmux browser 打开。
+- terminal 中的 `http://` / `https://` 链接点击后在 wmux browser 打开。
 - browser state 持久化。
 - 外部浏览器打开按钮。
 

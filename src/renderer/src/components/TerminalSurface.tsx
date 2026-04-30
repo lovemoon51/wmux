@@ -5,6 +5,9 @@ import { useEffect, useRef, type ReactElement } from "react";
 import type { ShellProfile, Surface, WorkspaceStatus } from "@shared/types";
 import "@xterm/xterm/css/xterm.css";
 
+const terminalUrlPattern = /https?:\/\/[^\s"'<>]+/gi;
+const terminalUrlTrailingPunctuationPattern = /[),.;\]}]+$/;
+
 const statusLabels: Record<WorkspaceStatus, string> = {
   idle: "Idle",
   running: "Running",
@@ -15,14 +18,25 @@ const statusLabels: Record<WorkspaceStatus, string> = {
 
 const pendingTerminalDisposeTimers = new Map<string, number>();
 
+function extractTerminalUrls(text: string): Array<{ url: string; index: number }> {
+  return Array.from(text.matchAll(terminalUrlPattern))
+    .map((match) => ({
+      url: match[0].replace(terminalUrlTrailingPunctuationPattern, ""),
+      index: match.index ?? 0
+    }))
+    .filter((match) => match.url.length > "https://".length);
+}
+
 export function TerminalSurface({
   surface,
   cwd,
-  shell
+  shell,
+  onOpenUrl
 }: {
   surface: Surface;
   cwd: string;
   shell: ShellProfile;
+  onOpenUrl?: (url: string) => void;
 }): ReactElement {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XTerm | null>(null);
@@ -92,11 +106,83 @@ export function TerminalSurface({
     const focusTerminal = (): void => terminal.focus();
     host.addEventListener("mousedown", focusTerminal);
 
+    const handleTerminalClick = (event: MouseEvent): void => {
+      if (!onOpenUrl) {
+        return;
+      }
+
+      const hostRect = host.getBoundingClientRect();
+      if (
+        event.clientX < hostRect.left ||
+        event.clientX > hostRect.right ||
+        event.clientY < hostRect.top ||
+        event.clientY > hostRect.bottom
+      ) {
+        return;
+      }
+
+      const rowElement = Array.from(host.querySelectorAll<HTMLElement>(".xterm-rows > div")).find((row) => {
+        const rect = row.getBoundingClientRect();
+        return event.clientY >= rect.top && event.clientY <= rect.bottom;
+      });
+      const rowText = rowElement?.textContent ?? "";
+      const rowUrls = extractTerminalUrls(rowText);
+      if (!rowElement || rowUrls.length === 0) {
+        return;
+      }
+
+      if (rowUrls.length === 1) {
+        onOpenUrl(rowUrls[0].url);
+        return;
+      }
+
+      const rowRect = rowElement.getBoundingClientRect();
+      const characterWidth = rowRect.width / Math.max(1, terminal.cols);
+      const clickedColumn = Math.floor((event.clientX - rowRect.left) / Math.max(1, characterWidth));
+      const clickedUrl = rowUrls.find(
+        (candidate) => clickedColumn >= candidate.index && clickedColumn <= candidate.index + candidate.url.length
+      );
+
+      if (clickedUrl) {
+        onOpenUrl(clickedUrl.url);
+      }
+    };
+    document.addEventListener("click", handleTerminalClick, true);
+
     const resizeObserver = new ResizeObserver(() => fitAndResize());
     resizeObserver.observe(host);
 
     const inputDisposable = terminal.onData((data) => {
       window.wmux?.terminal.input({ id: sessionId, data });
+    });
+
+    const linkProviderDisposable = terminal.registerLinkProvider({
+      provideLinks(bufferLineNumber, callback) {
+        const line = terminal.buffer.active.getLine(bufferLineNumber) ?? terminal.buffer.active.getLine(bufferLineNumber - 1);
+        const text = line?.translateToString(true) ?? "";
+        const links = extractTerminalUrls(text)
+          .map((match) => {
+            const startColumn = match.index + 1;
+            const endColumn = startColumn + match.url.length;
+
+            return {
+              range: {
+                start: { x: startColumn, y: bufferLineNumber },
+                end: { x: endColumn, y: bufferLineNumber }
+              },
+              text: match.url,
+              decorations: {
+                pointerCursor: true,
+                underline: true
+              },
+              activate: (_event: MouseEvent, textToOpen: string): void => {
+                onOpenUrl?.(textToOpen);
+              }
+            };
+          })
+
+        callback(links.length > 0 ? links : undefined);
+      }
     });
 
     const removeDataListener = window.wmux?.terminal.onData(({ id, data }) => {
@@ -126,7 +212,9 @@ export function TerminalSurface({
     return () => {
       resizeObserver.disconnect();
       host.removeEventListener("mousedown", focusTerminal);
+      document.removeEventListener("click", handleTerminalClick, true);
       inputDisposable.dispose();
+      linkProviderDisposable.dispose();
       removeDataListener?.();
       removeExitListener?.();
       const disposeTimer = window.setTimeout(() => {
@@ -138,7 +226,7 @@ export function TerminalSurface({
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [cwd, sessionId, shell]);
+  }, [cwd, onOpenUrl, sessionId, shell]);
 
   return (
     <div className="terminalSurface">
