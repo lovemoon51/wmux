@@ -68,7 +68,7 @@
 
 达到 90%：
 
-- [ ] custom commands 和 workspace layout 稳定。
+- [x] custom commands 和 workspace layout 稳定。
 - [ ] browser automation 覆盖常用 DOM/inspection/state 操作。
 - [ ] agent 通知和侧栏状态足够可靠。
 - [ ] terminal 体验接近日常主力终端。
@@ -76,5 +76,5 @@
 
 ## 6. Smoke 覆盖依据
 
-- `npm run smoke:terminal` 覆盖 workspace CRUD、sidebar 状态、split CRUD、surface tab、terminal 输入/resize、browser CRUD、拖拽分屏、session restore、command palette、快捷键和性能 smoke。
+- `npm run smoke:terminal` 覆盖 workspace CRUD、sidebar 状态、split CRUD、surface tab、terminal 输入/resize、browser CRUD、拖拽分屏、session restore、command palette、custom command 首次确认/取消、workspace layout、快捷键和性能 smoke。
 - `npm run smoke:browser` 覆盖 socket 安全模式、terminal 链接内置 browser、browser automation navigate/list/snapshot/fill/click/eval/screenshot、ambiguous target 和写文件路径校验。

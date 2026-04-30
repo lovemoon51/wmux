@@ -539,13 +539,15 @@ async function runBrowserCrud(window) {
   const activePane = window.locator(".paneActive");
   const browserTab = window.locator(".paneActive button.surfaceTab").filter({ hasText: /Browser/ }).last();
   await browserTab.waitFor({ timeout: 15_000 });
+  await browserTab.click();
+  await activePane.locator(".surfaceBodyFrameActive webview").waitFor({ timeout: 15_000 });
 
   const firstUrl = "data:text/html,<title>WMUX Browser One</title><h1>WMUX_BROWSER_ONE</h1>";
   const secondUrl = "data:text/html,<title>WMUX Browser Two</title><h1>WMUX_BROWSER_TWO</h1>";
-  const address = activePane.getByLabel("Browser address");
+  const address = activePane.locator(".surfaceBodyFrameActive").getByLabel("Browser address");
 
   await address.fill(firstUrl);
-  await window.keyboard.press("Enter");
+  await address.press("Enter");
   await window.waitForFunction(
     (targetUrl) => document.querySelector(".paneActive webview")?.getURL?.() === targetUrl,
     firstUrl,
@@ -591,7 +593,7 @@ async function runBrowserCrud(window) {
   log("ok browser auto zoom fit");
 
   await address.fill(secondUrl);
-  await window.keyboard.press("Enter");
+  await address.press("Enter");
   await window.waitForFunction(
     (targetUrl) => document.querySelector(".paneActive webview")?.getURL?.() === targetUrl,
     secondUrl,
@@ -679,6 +681,15 @@ async function runCommandPaletteSmoke(window) {
   await commandSearch.fill("run smoke");
   await commandSearch.press("ArrowDown");
   await commandSearch.press("ArrowUp");
+  await commandSearch.press("Enter");
+  await window.getByLabel("Confirm project command").waitFor({ timeout: 15_000 });
+  await window.getByRole("button", { name: "Cancel" }).click();
+  await window.getByLabel("Confirm project command").waitFor({ state: "detached", timeout: 15_000 });
+  const commandRanBeforeConfirm = await window.evaluate(() => document.body.textContent?.includes("WMUX_COMMAND_SMOKE"));
+  if (commandRanBeforeConfirm) {
+    throw new Error("Project command ran before confirmation");
+  }
+  await commandSearch.focus();
   await commandSearch.press("Enter");
   await window.getByLabel("Confirm project command").waitFor({ timeout: 15_000 });
   await window.getByRole("button", { name: "Run project command" }).click();
