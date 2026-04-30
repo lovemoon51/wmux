@@ -10,6 +10,7 @@ const execFileAsync = promisify(execFile);
 const logPath = "output/playwright/terminal-smoke.log";
 const smokeUserDataPath = resolve("output/playwright/wmux-smoke-user-data");
 const smokeSocketPath = process.platform === "win32" ? "\\\\.\\pipe\\wmux-smoke" : resolve("output/playwright/wmux-smoke.sock");
+const smokeSocketToken = "terminal-smoke-token";
 const projectConfigPath = resolve("wmux.json");
 const projectConfigBackupPath = resolve("output/playwright/wmux-json.backup");
 const hadProjectConfig = existsSync(projectConfigPath);
@@ -91,7 +92,8 @@ async function launchApp() {
     env: {
       ...process.env,
       WMUX_USER_DATA_DIR: smokeUserDataPath,
-      WMUX_SOCKET_PATH: smokeSocketPath
+      WMUX_SOCKET_PATH: smokeSocketPath,
+      WMUX_SOCKET_TOKEN: smokeSocketToken
     }
   });
 }
@@ -121,7 +123,8 @@ async function runCliCommand(args) {
     cwd: process.cwd(),
     env: {
       ...process.env,
-      WMUX_SOCKET_PATH: smokeSocketPath
+      WMUX_SOCKET_PATH: smokeSocketPath,
+      WMUX_SOCKET_TOKEN: smokeSocketToken
     },
     timeout: 10_000
   });
@@ -136,6 +139,22 @@ async function runCliSocketSmoke(window) {
     throw new Error(`wmux ping did not return pong: ${pingOutput}`);
   }
   log("ok wmux ping");
+
+  const identifyOutput = await runCliCommand(["identify", "--json"]);
+  const identify = JSON.parse(identifyOutput);
+  if (identify.app !== "wmux" || !identify.workspaceId || !identify.paneId || !identify.surfaceId) {
+    throw new Error(`wmux identify did not return active ids: ${identifyOutput}`);
+  }
+  log("ok wmux identify");
+
+  const capabilitiesOutput = await runCliCommand(["capabilities", "--json"]);
+  const capabilities = JSON.parse(capabilitiesOutput);
+  for (const method of ["system.identify", "system.capabilities", "surface.sendKey", "browser.list"]) {
+    if (!capabilities.methods?.includes(method)) {
+      throw new Error(`wmux capabilities did not include ${method}: ${capabilitiesOutput}`);
+    }
+  }
+  log("ok wmux capabilities");
 
   const workspaceOutput = await runCliCommand(["list-workspaces"]);
   if (!workspaceOutput.includes("API Server")) {
@@ -157,6 +176,20 @@ async function runCliSocketSmoke(window) {
   });
   log("ok wmux send");
 
+  const sendKeyText = "Write-Output WMUX_CLI_SEND_KEY";
+  const sendKeyTextOutput = await runCliCommand(["send", sendKeyText]);
+  if (!sendKeyTextOutput.includes("sent")) {
+    throw new Error(`wmux send did not report sent bytes for send-key smoke: ${sendKeyTextOutput}`);
+  }
+  const sendKeyOutput = await runCliCommand(["send-key", "enter"]);
+  if (!sendKeyOutput.includes("sent key enter")) {
+    throw new Error(`wmux send-key did not report sent key: ${sendKeyOutput}`);
+  }
+  await window.waitForFunction(() => document.body.textContent?.includes("WMUX_CLI_SEND_KEY"), null, {
+    timeout: 15_000
+  });
+  log("ok wmux send-key");
+
   const notifyOutput = await runCliCommand([
     "notify",
     "--title",
@@ -173,14 +206,20 @@ async function runCliSocketSmoke(window) {
   log("ok wmux notify");
 }
 
+async function renameWorkspace(window, currentName, nextName) {
+  await window.getByRole("heading", { name: currentName }).waitFor({ timeout: 15_000 });
+  await window.getByLabel(`Open workspace ${currentName}`).focus();
+  await window.keyboard.press("F2");
+  const nameInput = window.getByLabel("Workspace name");
+  await nameInput.fill(nextName);
+  await nameInput.press("Enter");
+  await window.getByRole("heading", { name: nextName }).waitFor({ timeout: 15_000 });
+}
+
 async function runWorkspaceCrud(window) {
   log("workspace crud");
   await window.getByLabel("New workspace").click();
-  await window.getByRole("heading", { name: "Workspace 1" }).waitFor({ timeout: 15_000 });
-  await window.getByLabel("Rename workspace Workspace 1").click();
-  await window.getByLabel("Workspace name").fill("Smoke Workspace");
-  await window.keyboard.press("Enter");
-  await window.getByRole("heading", { name: "Smoke Workspace" }).waitFor({ timeout: 15_000 });
+  await renameWorkspace(window, "Workspace 1", "Smoke Workspace");
   await runTerminalCommand(window, "Write-Output WMUX_WORKSPACE_SMOKE", "WMUX_WORKSPACE_SMOKE");
 
   await window.getByLabel("Open workspace API Server").click();
@@ -189,10 +228,7 @@ async function runWorkspaceCrud(window) {
   await window.getByLabel("Open workspace Smoke Workspace").click();
   await window.getByRole("heading", { name: "Smoke Workspace" }).waitFor({ timeout: 15_000 });
 
-  await window.getByLabel("Rename workspace Smoke Workspace").click();
-  await window.getByLabel("Workspace name").fill("Smoke Renamed");
-  await window.keyboard.press("Enter");
-  await window.getByRole("heading", { name: "Smoke Renamed" }).waitFor({ timeout: 15_000 });
+  await renameWorkspace(window, "Smoke Workspace", "Smoke Renamed");
 
   await window.getByLabel("Close workspace Smoke Renamed").click();
   await window.waitForFunction(() => !document.body.textContent?.includes("Smoke Renamed"), null, {
@@ -206,11 +242,7 @@ async function runWorkspaceCrud(window) {
 async function runSplitCrud(window) {
   log("split crud");
   await window.getByLabel("New workspace").click();
-  await window.getByRole("heading", { name: "Workspace 2" }).waitFor({ timeout: 15_000 });
-  await window.getByLabel("Rename workspace Workspace 2").click();
-  await window.getByLabel("Workspace name").fill("Split Smoke");
-  await window.keyboard.press("Enter");
-  await window.getByRole("heading", { name: "Split Smoke" }).waitFor({ timeout: 15_000 });
+  await renameWorkspace(window, "Workspace 2", "Split Smoke");
 
   await window.getByLabel("Split horizontally").click();
   await window.waitForFunction(() => document.querySelectorAll(".pane").length >= 2, null, { timeout: 15_000 });
@@ -393,15 +425,16 @@ async function runCommandPaletteSmoke(window) {
   await window.getByText("2 个项目命令").waitFor({ timeout: 15_000 });
   log("ok project wmux config");
 
-  await window.getByLabel("Command search").fill("layout");
-  await window.keyboard.press("Escape");
+  const commandSearch = window.getByLabel("Command search");
+  await commandSearch.fill("layout");
+  await commandSearch.press("Escape");
   await window.getByLabel("Command palette").waitFor({ state: "detached", timeout: 15_000 });
 
   await window.getByRole("button", { name: "Command" }).click();
-  await window.getByLabel("Command search").fill("run smoke");
-  await window.keyboard.press("ArrowDown");
-  await window.keyboard.press("ArrowUp");
-  await window.keyboard.press("Enter");
+  await commandSearch.fill("run smoke");
+  await commandSearch.press("ArrowDown");
+  await commandSearch.press("ArrowUp");
+  await commandSearch.press("Enter");
   await window.getByLabel("Command palette").waitFor({ state: "detached", timeout: 15_000 });
   log("ok command palette keyboard");
   await window.waitForFunction(() => document.body.textContent?.includes("WMUX_COMMAND_SMOKE"), null, {
@@ -410,8 +443,8 @@ async function runCommandPaletteSmoke(window) {
   log("ok simple command");
 
   await window.getByRole("button", { name: "Command" }).click();
-  await window.getByLabel("Command search").fill("dev layout");
-  await window.keyboard.press("Enter");
+  await commandSearch.fill("dev layout");
+  await commandSearch.press("Enter");
   await window.getByRole("heading", { name: "Command Layout Smoke" }).waitFor({ timeout: 15_000 });
   await window.waitForFunction(() => document.querySelectorAll(".pane").length >= 2, null, { timeout: 15_000 });
   await window.waitForFunction(
@@ -444,10 +477,7 @@ async function runSessionRestoreSmoke(currentApp, window) {
     throw new Error("New workspace heading was empty before restore smoke");
   }
 
-  await window.getByLabel(`Rename workspace ${workspaceHeading}`).click();
-  await window.getByLabel("Workspace name").fill("Restore Smoke");
-  await window.keyboard.press("Enter");
-  await window.getByRole("heading", { name: "Restore Smoke" }).waitFor({ timeout: 15_000 });
+  await renameWorkspace(window, workspaceHeading, "Restore Smoke");
   await window.getByRole("button", { name: "Browser" }).click();
   const restoreUrl = "data:text/html,<title>WMUX Restore</title><h1>WMUX_RESTORE_BROWSER</h1>";
   await window.locator(".paneActive").getByLabel("Browser address").fill(restoreUrl);
@@ -489,10 +519,10 @@ try {
     .evaluateAll((options) => options.map((option) => ({ value: option.value, label: option.textContent })));
   log(`shell options ${JSON.stringify(shellOptions)}`);
 
+  await runCliSocketSmoke(window);
   await runWorkspaceCrud(window);
   await runSplitCrud(window);
   await runBrowserCrud(window);
-  await runCliSocketSmoke(window);
   await runCommandPaletteSmoke(window);
 
   await runTerminalCommand(window, "pwd", "D:\\IdeaProject\\codex\\wmux");

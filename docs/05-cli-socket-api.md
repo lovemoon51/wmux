@@ -80,6 +80,8 @@ wmux send-key enter
 wmux paste
 ```
 
+`send-key` P0 支持 `enter`、`tab`、`escape`/`esc`、`backspace`、`delete`、方向键 `up`/`down`/`left`/`right`，以及 `ctrl+c`、`ctrl+d`、`ctrl+l`。
+
 ### 状态和通知
 
 ```bash
@@ -150,4 +152,3 @@ INTERNAL
 - 命令命名尽量与 cmux 接近，但使用 `wmux` 前缀。
 - `wmux.json` 的 workspace layout schema 尽量兼容 cmux 子集。
 - 环境变量使用 `WMUX_*`，可选提供 `CMUX_*` 兼容模式，但默认不冒充 cmux。
-

@@ -23,8 +23,11 @@ function getDefaultSocketPath() {
 function printUsage() {
   console.error(`用法：
   wmux ping [--json]
+  wmux identify [--json]
+  wmux capabilities [--json]
   wmux list-workspaces [--json]
   wmux send <text> [--json]
+  wmux send-key <key> [--surface <id>] [--json]
   wmux notify --title <title> [--body <body>] [--json]
   wmux browser navigate <url> [--surface <id>] [--create] [--wait load|domcontentloaded|none] [--timeout <ms>] [--json]
   wmux browser open <url> [--json]
@@ -213,6 +216,14 @@ function createRequest() {
     return { method: "system.ping", params: {} };
   }
 
+  if (command === "identify") {
+    return { method: "system.identify", params: {} };
+  }
+
+  if (command === "capabilities") {
+    return { method: "system.capabilities", params: {} };
+  }
+
   if (command === "list-workspaces") {
     return { method: "workspace.list", params: {} };
   }
@@ -224,6 +235,21 @@ function createRequest() {
     }
 
     return { method: "surface.sendText", params: { text: text.replaceAll("\\n", "\n") } };
+  }
+
+  if (command === "send-key") {
+    const key = args[1];
+    if (!key || key.startsWith("--")) {
+      throw cliError("send-key 需要 key 参数");
+    }
+
+    return {
+      method: "surface.sendKey",
+      params: {
+        key,
+        ...(parseOption("--surface") ? { surfaceId: parseOption("--surface") } : {})
+      }
+    };
   }
 
   if (command === "notify") {
@@ -369,6 +395,21 @@ function printResult(result) {
     return;
   }
 
+  if (command === "identify") {
+    const surface = result?.surfaceId ? ` surface=${result.surfaceId}` : "";
+    console.log(
+      `${result?.app ?? "wmux"} workspace=${result?.workspaceId ?? "unknown"} pane=${result?.paneId ?? "unknown"}${surface}`
+    );
+    return;
+  }
+
+  if (command === "capabilities") {
+    for (const method of result?.methods ?? []) {
+      console.log(method);
+    }
+    return;
+  }
+
   if (command === "list-workspaces") {
     for (const workspace of result?.workspaces ?? []) {
       const activePrefix = workspace.active ? "*" : " ";
@@ -379,6 +420,11 @@ function printResult(result) {
 
   if (command === "send") {
     console.log(`sent ${result?.bytes ?? 0} bytes to ${result?.surfaceId ?? "terminal"}`);
+    return;
+  }
+
+  if (command === "send-key") {
+    console.log(`sent key ${result?.key ?? ""} to ${result?.surfaceId ?? "terminal"}`);
     return;
   }
 

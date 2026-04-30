@@ -45,11 +45,13 @@ import type {
   LayoutNode,
   NotifyParams,
   PersistedAppState,
+  SendKeyParams,
   SendTextParams,
   ShellProfile,
   ShellProfileOption,
   SocketRpcErrorDetails,
   SocketRpcErrorCode,
+  SocketRpcMethod,
   SocketRpcRequest,
   SocketRpcResponse,
   Surface,
@@ -707,6 +709,56 @@ function getActiveTerminalSurface(workspace: Workspace, preferredSurfaceId?: str
   const fallbackSurfaceId = activePane?.surfaceIds.find((surfaceId) => workspace.surfaces[surfaceId]?.type === "terminal");
   return fallbackSurfaceId ? workspace.surfaces[fallbackSurfaceId] : null;
 }
+
+const terminalKeySequences: Record<string, string> = {
+  enter: "\r",
+  return: "\r",
+  tab: "\t",
+  escape: "\x1b",
+  esc: "\x1b",
+  backspace: "\x7f",
+  delete: "\x1b[3~",
+  del: "\x1b[3~",
+  up: "\x1b[A",
+  arrowup: "\x1b[A",
+  down: "\x1b[B",
+  arrowdown: "\x1b[B",
+  right: "\x1b[C",
+  arrowright: "\x1b[C",
+  left: "\x1b[D",
+  arrowleft: "\x1b[D",
+  "ctrl+c": "\x03",
+  "ctrl-c": "\x03",
+  "ctrl+d": "\x04",
+  "ctrl-d": "\x04",
+  "ctrl+l": "\x0c",
+  "ctrl-l": "\x0c"
+};
+
+function normalizeTerminalKey(key: string): string {
+  return key.trim().toLowerCase();
+}
+
+function getTerminalKeySequence(key: string): string | null {
+  return terminalKeySequences[normalizeTerminalKey(key)] ?? null;
+}
+
+const socketCapabilities: SocketRpcMethod[] = [
+  "system.ping",
+  "system.identify",
+  "system.capabilities",
+  "workspace.list",
+  "surface.sendText",
+  "surface.sendKey",
+  "status.notify",
+  "browser.navigate",
+  "browser.click",
+  "browser.fill",
+  "browser.eval",
+  "browser.snapshot",
+  "browser.list",
+  "browser.screenshot"
+];
 
 function isBrowserRpcMethod(method: string): method is BrowserRpcMethod {
   return (
@@ -1661,6 +1713,33 @@ export function App(): ReactElement {
         return;
       }
 
+      if (request.method === "system.identify") {
+        const activePane = currentWorkspace.panes[currentWorkspace.activePaneId];
+        const activeSurface = activePane ? currentWorkspace.surfaces[activePane.activeSurfaceId] : undefined;
+        window.wmux?.socket.respond(
+          createSocketSuccessResponse(request.id, {
+            app: "wmux",
+            workspaceId: currentWorkspace.id,
+            workspaceName: currentWorkspace.name,
+            paneId: activePane?.id ?? currentWorkspace.activePaneId,
+            surfaceId: activeSurface?.id ?? activePane?.activeSurfaceId,
+            surfaceType: activeSurface?.type,
+            cwd: currentWorkspace.cwd,
+            status: currentWorkspace.status
+          })
+        );
+        return;
+      }
+
+      if (request.method === "system.capabilities") {
+        window.wmux?.socket.respond(
+          createSocketSuccessResponse(request.id, {
+            methods: socketCapabilities
+          })
+        );
+        return;
+      }
+
       if (request.method === "workspace.list") {
         window.wmux?.socket.respond(
           createSocketSuccessResponse(request.id, {
@@ -1688,6 +1767,41 @@ export function App(): ReactElement {
           createSocketSuccessResponse(request.id, {
             surfaceId: terminalSurface.id,
             bytes: params.text.length
+          })
+        );
+        return;
+      }
+
+      if (request.method === "surface.sendKey") {
+        const params = (request.params ?? {}) as Partial<SendKeyParams>;
+        if (typeof params.key !== "string" || !params.key.trim()) {
+          window.wmux?.socket.respond(createSocketErrorResponse(request.id, "BAD_REQUEST", "sendKey 需要 key 字符串"));
+          return;
+        }
+
+        const sequence = getTerminalKeySequence(params.key);
+        if (!sequence) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "BAD_REQUEST", `不支持的 terminal key：${params.key}`, {
+              key: params.key,
+              supportedKeys: Object.keys(terminalKeySequences)
+            })
+          );
+          return;
+        }
+
+        const terminalSurface = getActiveTerminalSurface(currentWorkspace, params.surfaceId);
+        if (!terminalSurface) {
+          window.wmux?.socket.respond(createSocketErrorResponse(request.id, "NOT_FOUND", "当前 workspace 没有 terminal surface"));
+          return;
+        }
+
+        window.wmux?.terminal.input({ id: `${terminalSurface.id}:${shellProfileRef.current}`, data: sequence });
+        window.wmux?.socket.respond(
+          createSocketSuccessResponse(request.id, {
+            surfaceId: terminalSurface.id,
+            key: normalizeTerminalKey(params.key),
+            bytes: sequence.length
           })
         );
         return;
@@ -2396,31 +2510,17 @@ function WorkspaceSidebar({
               className={`workspaceItem ${workspace.id === activeWorkspaceId ? "workspaceItemActive" : ""}`}
               key={workspace.id}
             >
-              <div
-                className="workspaceSelect"
-                role="button"
-                tabIndex={0}
-                aria-label={`Open workspace ${workspace.name}`}
-                onClick={() => onSelect(workspace.id)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    onSelect(workspace.id);
-                  }
-                }}
-              >
-                <span className={`statusRing ${statusClass[workspace.status]}`} />
-                <span className="workspaceMain">
-                  <span className="workspaceTitleRow">
-                    {isEditing ? (
+              {isEditing ? (
+                <div className="workspaceSelect">
+                  <span className={`statusRing ${statusClass[workspace.status]}`} />
+                  <span className="workspaceMain">
+                    <span className="workspaceTitleRow">
                       <input
                         className="workspaceNameInput"
                         aria-label="Workspace name"
                         value={workspaceNameDraft}
                         autoFocus
                         onChange={(event) => onRenameDraftChange(event.target.value)}
-                        onBlur={onCommitRename}
-                        onClick={(event) => event.stopPropagation()}
                         onKeyDown={(event) => {
                           event.stopPropagation();
                           if (event.key === "Enter") {
@@ -2433,9 +2533,43 @@ function WorkspaceSidebar({
                           }
                         }}
                       />
-                    ) : (
-                      <span className="workspaceName">{workspace.name}</span>
-                    )}
+                      <span className="workspaceStatus">{statusLabels[workspace.status]}</span>
+                    </span>
+                    <span className="workspacePath">{workspace.cwd}</span>
+                    <span className="workspaceMeta">
+                      {workspace.branch && (
+                        <span className="metaPill">
+                          <GitBranch size={12} />
+                          {workspace.branch}
+                        </span>
+                      )}
+                      {workspace.ports.map((port) => (
+                        <span className="metaPill" key={port}>
+                          :{port}
+                        </span>
+                      ))}
+                    </span>
+                    {workspace.notice && <span className="workspaceNotice">{workspace.notice}</span>}
+                  </span>
+                </div>
+              ) : (
+                <button
+                  className="workspaceSelect"
+                  type="button"
+                  aria-label={`Open workspace ${workspace.name}`}
+                  onClick={() => onSelect(workspace.id)}
+                  onDoubleClick={() => onStartRename(workspace)}
+                  onKeyDown={(event) => {
+                    if (event.key === "F2") {
+                      event.preventDefault();
+                      onStartRename(workspace);
+                    }
+                  }}
+                >
+                <span className={`statusRing ${statusClass[workspace.status]}`} />
+                <span className="workspaceMain">
+                  <span className="workspaceTitleRow">
+                    <span className="workspaceName">{workspace.name}</span>
                     <span className="workspaceStatus">{statusLabels[workspace.status]}</span>
                   </span>
                   <span className="workspacePath">{workspace.cwd}</span>
@@ -2454,14 +2588,22 @@ function WorkspaceSidebar({
                   </span>
                   {workspace.notice && <span className="workspaceNotice">{workspace.notice}</span>}
                 </span>
-              </div>
+                </button>
+              )}
               <div className="workspaceActions">
                 <button
                   className="workspaceActionButton"
                   type="button"
                   aria-label={`Rename workspace ${workspace.name}`}
                   title={`Rename ${workspace.name}`}
-                  onClick={() => onStartRename(workspace)}
+                  onMouseDown={(event) => {
+                    event.stopPropagation();
+                    onStartRename(workspace);
+                  }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onStartRename(workspace);
+                  }}
                 >
                   <Pencil size={13} />
                 </button>
@@ -2471,7 +2613,10 @@ function WorkspaceSidebar({
                   aria-label={`Close workspace ${workspace.name}`}
                   title={`Close ${workspace.name}`}
                   disabled={workspaces.length <= 1}
-                  onClick={() => onClose(workspace.id)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onClose(workspace.id);
+                  }}
                 >
                   <X size={14} />
                 </button>

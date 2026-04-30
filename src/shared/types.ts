@@ -62,8 +62,11 @@ export type WmuxProjectConfigResult = {
 
 export type SocketRpcMethod =
   | "system.ping"
+  | "system.identify"
+  | "system.capabilities"
   | "workspace.list"
   | "surface.sendText"
+  | "surface.sendKey"
   | "status.notify"
   | BrowserRpcMethod;
 
@@ -130,6 +133,11 @@ export type WorkspaceSummary = {
 export type SendTextParams = {
   surfaceId?: string;
   text: string;
+};
+
+export type SendKeyParams = {
+  surfaceId?: string;
+  key: string;
 };
 
 export type NotifyParams = {
