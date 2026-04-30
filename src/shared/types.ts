@@ -86,6 +86,7 @@ export type SocketRpcMethod =
   | "workspace.rename"
   | "surface.list"
   | "surface.createTerminal"
+  | "surface.createBrowser"
   | "surface.focus"
   | "surface.sendText"
   | "surface.sendKey"
@@ -204,6 +205,12 @@ export type SurfaceCreateTerminalParams = {
   paneId?: string;
   name?: string;
   cwd?: string;
+};
+
+export type SurfaceCreateBrowserParams = {
+  paneId?: string;
+  name?: string;
+  url?: string;
 };
 
 export type SurfaceFocusParams = {

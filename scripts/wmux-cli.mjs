@@ -31,6 +31,7 @@ function printUsage() {
   wmux close-workspace --workspace <id> [--json]
   wmux rename-workspace --workspace <id> --name <name> [--json]
   wmux new-terminal [--pane <id>] [--name <name>] [--cwd <path>] [--json]
+  wmux new-browser [--pane <id>] [--name <name>] [--url <url>] [--json]
   wmux surface list [--workspace <id>] [--json]
   wmux surface focus --surface <id> [--json]
   wmux send <text> [--json]
@@ -339,6 +340,29 @@ function createRequest() {
     };
   }
 
+  if (command === "new-browser") {
+    const paneId = parseOption("--pane");
+    const name = parseOption("--name");
+    const url = parseOption("--url");
+    if (paneId !== undefined && (!paneId || paneId.startsWith("--"))) {
+      throw cliError("new-browser 的 --pane 需要 pane id");
+    }
+    if (name !== undefined && (!name || name.startsWith("--"))) {
+      throw cliError("new-browser 的 --name 需要名称");
+    }
+    if (url !== undefined && (!url || url.startsWith("--"))) {
+      throw cliError("new-browser 的 --url 需要 url");
+    }
+    return {
+      method: "surface.createBrowser",
+      params: {
+        ...(paneId ? { paneId } : {}),
+        ...(name ? { name } : {}),
+        ...(url ? { url } : {})
+      }
+    };
+  }
+
   if (command === "surface") {
     const surfaceCommand = args[1];
 
@@ -633,6 +657,11 @@ function printResult(result) {
 
   if (command === "new-terminal") {
     console.log(`created ${result?.surface?.name ?? result?.surface?.id ?? "terminal"}`);
+    return;
+  }
+
+  if (command === "new-browser") {
+    console.log(`created ${result?.surface?.name ?? result?.surface?.id ?? "browser"}`);
     return;
   }
 

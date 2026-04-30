@@ -59,6 +59,7 @@ import type {
   SocketSecuritySettings,
   StatusListParams,
   Surface,
+  SurfaceCreateBrowserParams,
   SurfaceCreateTerminalParams,
   SurfaceFocusParams,
   SurfaceListParams,
@@ -169,13 +170,14 @@ function createTerminalSurface(options: { name?: string; cwd?: string } = {}): S
   };
 }
 
-function createBrowserSurface(): Surface {
+function createBrowserSurface(options: { name?: string; url?: string } = {}): Surface {
   const number = nextSurfaceNumber++;
+  const url = options.url ? normalizeBrowserUrl(options.url) : "about:blank";
   return {
     id: `surface-browser-${Date.now()}-${number}`,
     type: "browser",
-    name: `Browser ${number}`,
-    subtitle: "about:blank",
+    name: options.name?.trim() || `Browser ${number}`,
+    subtitle: url,
     status: "idle"
   };
 }
@@ -778,6 +780,7 @@ const socketCapabilities: SocketRpcMethod[] = [
   "workspace.rename",
   "surface.list",
   "surface.createTerminal",
+  "surface.createBrowser",
   "surface.focus",
   "surface.sendText",
   "surface.sendKey",
@@ -2120,6 +2123,73 @@ export function App(): ReactElement {
         }
 
         const surface = createTerminalSurface({ name: params.name, cwd: params.cwd });
+        setWorkspaces((items) =>
+          items.map((workspace) =>
+            workspace.id === currentWorkspace.id
+              ? {
+                  ...workspace,
+                  activePaneId: paneId,
+                  panes: {
+                    ...workspace.panes,
+                    [paneId]: {
+                      ...pane,
+                      surfaceIds: [...pane.surfaceIds, surface.id],
+                      activeSurfaceId: surface.id
+                    }
+                  },
+                  surfaces: {
+                    ...workspace.surfaces,
+                    [surface.id]: surface
+                  }
+                }
+              : workspace
+          )
+        );
+
+        window.wmux?.socket.respond(
+          createSocketSuccessResponse(request.id, {
+            workspaceId: currentWorkspace.id,
+            paneId,
+            surface
+          })
+        );
+        return;
+      }
+
+      if (request.method === "surface.createBrowser") {
+        const params = (request.params ?? {}) as Partial<SurfaceCreateBrowserParams>;
+        if (params.paneId !== undefined && (typeof params.paneId !== "string" || !params.paneId.trim())) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "BAD_REQUEST", "surface.createBrowser paneId 不能为空")
+          );
+          return;
+        }
+        if (params.name !== undefined && (typeof params.name !== "string" || !params.name.trim())) {
+          window.wmux?.socket.respond(createSocketErrorResponse(request.id, "BAD_REQUEST", "surface.createBrowser name 不能为空"));
+          return;
+        }
+        if (params.url !== undefined && (typeof params.url !== "string" || !params.url.trim())) {
+          window.wmux?.socket.respond(createSocketErrorResponse(request.id, "BAD_REQUEST", "surface.createBrowser url 不能为空"));
+          return;
+        }
+
+        const paneId = params.paneId?.trim() || currentWorkspace.activePaneId;
+        const pane = currentWorkspace.panes[paneId];
+        if (!pane) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "NOT_FOUND", "找不到 pane", {
+              paneId
+            })
+          );
+          return;
+        }
+
+        const surface = createBrowserSurface({ name: params.name, url: params.url });
+        browserSessions.set(surface.id, {
+          history: [surface.subtitle ?? "about:blank"],
+          historyIndex: 0,
+          url: surface.subtitle ?? "about:blank"
+        });
         setWorkspaces((items) =>
           items.map((workspace) =>
             workspace.id === currentWorkspace.id

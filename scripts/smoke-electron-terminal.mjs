@@ -331,7 +331,7 @@ async function runTerminalCommand(window, command, expectedText) {
 async function navigateActiveBrowser(activePane, url) {
   const address = activePane.locator(".surfaceBodyFrameActive .browserSurface input[aria-label='Browser address']");
   await address.waitFor({ timeout: 15_000 });
-  const webview = activePane.locator("webview");
+  const webview = activePane.locator(".surfaceBodyFrameActive webview");
   const navigation = webview.evaluate(
     (webviewElement, targetUrl) =>
       new Promise((resolve, reject) => {
@@ -393,6 +393,10 @@ function activeBrowserPane(window) {
       has: window.locator(".surfaceBodyFrameActive .browserSurface input[aria-label='Browser address']")
     })
     .first();
+}
+
+function activeBrowserControl(window, label) {
+  return activeBrowserPane(window).locator(".surfaceBodyFrameActive").getByLabel(label);
 }
 
 async function runEightTerminalSurfaceLatencySmoke(window) {
@@ -484,6 +488,7 @@ async function runCliSocketSmoke(window) {
     "workspace.rename",
     "surface.list",
     "surface.createTerminal",
+    "surface.createBrowser",
     "surface.focus",
     "surface.sendKey",
     "status.clear",
@@ -637,6 +642,36 @@ async function runCliSocketSmoke(window) {
   });
   await runCliCommand(["surface", "focus", "--surface", "surface-agent"]);
   log("ok wmux new-terminal");
+
+  const createBrowserOutput = await runCliCommand([
+    "new-browser",
+    "--name",
+    "CLI Browser Smoke",
+    "--url",
+    "data:text/html,<title>CLI Browser Smoke</title><h1>WMUX_CLI_BROWSER</h1>"
+  ]);
+  if (!createBrowserOutput.includes("created CLI Browser Smoke")) {
+    throw new Error(`wmux new-browser did not report created CLI Browser Smoke: ${createBrowserOutput}`);
+  }
+  const createdBrowserOutput = await runCliCommand(["identify", "--json"]);
+  const createdBrowser = JSON.parse(createdBrowserOutput);
+  if (createdBrowser.surfaceType !== "browser") {
+    throw new Error(`wmux new-browser did not activate a browser surface: ${createdBrowserOutput}`);
+  }
+  const browserAfterCreateOutput = await runCliCommand(["browser", "list", "--json"]);
+  const browsersAfterCreate = JSON.parse(browserAfterCreateOutput);
+  if (
+    !browsersAfterCreate.browsers?.some(
+      (browser) =>
+        browser.surfaceId === createdBrowser.surfaceId &&
+        browser.title === "CLI Browser Smoke" &&
+        browser.url.includes("WMUX_CLI_BROWSER")
+    )
+  ) {
+    throw new Error(`wmux browser list did not include CLI Browser Smoke: ${browserAfterCreateOutput}`);
+  }
+  await runCliCommand(["surface", "focus", "--surface", "surface-agent"]);
+  log("ok wmux new-browser");
 
   await window.locator('button.surfaceTab[aria-label="Codex Agent"]').click();
   await window.waitForSelector(".paneActive .surfaceBodyFrameActive .terminalHost .xterm textarea", {
@@ -847,7 +882,7 @@ async function runBrowserCrud(window) {
   await navigateActiveBrowser(activePane, firstUrl);
   await window.waitForFunction(activeBrowserUrlMatches, firstUrl, { timeout: 15_000 });
   log("ok browser first url");
-  const browserMetrics = await activePane.locator("webview").evaluate((webview) => {
+  const browserMetrics = await activePane.locator(".surfaceBodyFrameActive webview").evaluate((webview) => {
     const rect = webview.getBoundingClientRect();
     return {
       elementWidth: rect.width,
@@ -872,9 +907,11 @@ async function runBrowserCrud(window) {
       }
     });
   await window.waitForTimeout(500);
-  await activePane.locator("webview").waitFor({ timeout: 15_000 });
+  await activePane.locator(".surfaceBodyFrameActive webview").waitFor({ timeout: 15_000 });
   log("ok browser resize adaptive");
-  const resizedBrowserWidth = await activePane.locator("webview").evaluate((webview) => webview.getBoundingClientRect().width);
+  const resizedBrowserWidth = await activePane
+    .locator(".surfaceBodyFrameActive webview")
+    .evaluate((webview) => webview.getBoundingClientRect().width);
   await window.waitForFunction(
     async ({ shouldZoom }) => {
       const activeBrowser = document.querySelector(
@@ -892,17 +929,17 @@ async function runBrowserCrud(window) {
   await window.waitForFunction(activeBrowserUrlMatches, secondUrl, { timeout: 15_000 });
   log("ok browser second url");
 
-  await expectEnabled(activeBrowserPane(window).getByLabel("Back"));
-  await activeBrowserPane(window).getByLabel("Back").click();
+  await expectEnabled(activeBrowserControl(window, "Back"));
+  await activeBrowserControl(window, "Back").click();
   await window.waitForFunction(activeBrowserUrlMatches, firstUrl, { timeout: 15_000 });
   log("ok browser back");
 
-  await expectEnabled(activeBrowserPane(window).getByLabel("Forward"));
-  await activeBrowserPane(window).getByLabel("Forward").click();
+  await expectEnabled(activeBrowserControl(window, "Forward"));
+  await activeBrowserControl(window, "Forward").click();
   await window.waitForFunction(activeBrowserUrlMatches, secondUrl, { timeout: 15_000 });
   log("ok browser forward");
 
-  await activeBrowserPane(window).getByLabel("Reload").click();
+  await activeBrowserControl(window, "Reload").click();
   await window.waitForFunction(activeBrowserUrlMatches, secondUrl, { timeout: 15_000 });
   log("ok browser reload");
 
