@@ -165,10 +165,9 @@ async function getReadyWindow(app) {
 
 async function runWorkspaceInspectionSmoke(window, expectedPort) {
   log("workspace inspection");
-  await window.waitForFunction((port) => document.body.textContent?.includes(`:${port}`), expectedPort, {
-    timeout: 15_000
-  });
-  await window.waitForFunction(() => document.body.textContent?.includes("main"), null, { timeout: 15_000 });
+  const apiWorkspaceItem = window.locator(".workspaceItem").filter({ hasText: "API Server" }).first();
+  await apiWorkspaceItem.getByText(`:${expectedPort}`).waitFor({ timeout: 15_000 });
+  await apiWorkspaceItem.getByText("main").waitFor({ timeout: 15_000 });
   log("ok workspace inspection");
 }
 
@@ -444,6 +443,9 @@ async function runCliSocketSmoke(window) {
   await window.waitForFunction(() => document.body.textContent?.includes("WMUX_CLI_NOTIFY: socket smoke"), null, {
     timeout: 15_000
   });
+  const apiWorkspaceItem = window.locator(".workspaceItem").filter({ hasText: "API Server" }).first();
+  await apiWorkspaceItem.getByText("Needs input").waitFor({ timeout: 15_000 });
+  await apiWorkspaceItem.getByText("WMUX_CLI_NOTIFY: socket smoke").waitFor({ timeout: 15_000 });
   log("ok wmux notify");
 }
 
