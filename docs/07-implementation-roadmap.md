@@ -72,7 +72,7 @@
 - surface list/focus/split。
 - terminal `send`、`send-key`。
 - status set/clear/list。
-- 安全模式。
+- 安全模式，规格先行：[Socket 安全模式、trusted cwd 与 token 规格](10-socket-security-trusted-cwd-token.md)。
 
 交付物：
 

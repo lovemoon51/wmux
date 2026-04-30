@@ -1,9 +1,16 @@
 import { app, BrowserWindow, ipcMain, nativeTheme, shell } from "electron";
+import { randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { registerPtyIpc } from "./pty/ptyManager";
-import { createRpcError, getDefaultSocketPath, registerSocketRpcServer, type SocketRpcServer } from "./socket/rpcServer";
+import {
+  createRpcError,
+  getDefaultSocketPath,
+  registerSocketRpcServer,
+  type SocketRpcServer,
+  type SocketSecurityMode
+} from "./socket/rpcServer";
 import type {
   BrowserRpcMethod,
   PersistedAppState,
@@ -20,6 +27,9 @@ import type {
 const isDev = !app.isPackaged;
 const userDataDir = process.env.WMUX_USER_DATA_DIR;
 const socketPath = getDefaultSocketPath();
+const socketSecurityMode = readSocketSecurityMode();
+const socketToken = process.env.WMUX_SOCKET_TOKEN || randomBytes(32).toString("hex");
+const socketAllowAllWarning = "WMUX_SECURITY_MODE=allowAll: local socket accepts requests without token.";
 let mainWindow: BrowserWindow | null = null;
 let socketRpcServer: SocketRpcServer | null = null;
 const pendingRendererRequests = new Map<
@@ -31,6 +41,8 @@ const pendingRendererRequests = new Map<
   }
 >();
 process.env.WMUX_SOCKET_PATH = socketPath;
+process.env.WMUX_SOCKET_TOKEN = socketToken;
+process.env.WMUX_SECURITY_MODE = socketSecurityMode;
 
 if (userDataDir) {
   app.setPath("userData", userDataDir);
@@ -40,6 +52,15 @@ if (userDataDir) {
 
 function getStatePath(): string {
   return join(app.getPath("userData"), "workspace-state.json");
+}
+
+function readSocketSecurityMode(): SocketSecurityMode {
+  const value = process.env.WMUX_SECURITY_MODE;
+  if (value === "off" || value === "wmuxOnly" || value === "token" || value === "allowAll") {
+    return value;
+  }
+
+  return "wmuxOnly";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -280,6 +301,7 @@ function isBrowserRpcMethod(method: string): method is BrowserRpcMethod {
     method === "browser.fill" ||
     method === "browser.eval" ||
     method === "browser.snapshot" ||
+    method === "browser.list" ||
     method === "browser.screenshot"
   );
 }
@@ -307,7 +329,7 @@ function registerSocketBridgeIpc(): void {
       return;
     }
 
-    pendingRequest.reject(createRpcError(response.error.code, response.error.message));
+    pendingRequest.reject(createRpcError(response.error.code, response.error.message, response.error.details));
   });
 }
 
@@ -356,6 +378,10 @@ app.whenReady().then(() => {
   nativeTheme.themeSource = "dark";
 
   ipcMain.handle("app:version", () => app.getVersion());
+  ipcMain.handle("app:securityState", () => ({
+    mode: socketSecurityMode,
+    warning: socketSecurityMode === "allowAll" ? socketAllowAllWarning : undefined
+  }));
   ipcMain.handle("config:loadProjectConfig", () => loadProjectConfig());
   ipcMain.handle("workspace:loadState", async (): Promise<PersistedAppState | null> => {
     try {
@@ -381,9 +407,21 @@ app.whenReady().then(() => {
   );
   registerPtyIpc();
   registerSocketBridgeIpc();
-  void registerSocketRpcServer({ dispatch: dispatchSocketRequestToRenderer, path: socketPath }).then((server) => {
-    socketRpcServer = server;
-  });
+  if (socketSecurityMode === "off") {
+    console.warn("WMUX_SECURITY_MODE=off: socket server disabled.");
+  } else {
+    void registerSocketRpcServer({
+      dispatch: dispatchSocketRequestToRenderer,
+      path: socketPath,
+      securityMode: socketSecurityMode,
+      token: socketToken
+    }).then((server) => {
+      socketRpcServer = server;
+      if (socketSecurityMode === "allowAll") {
+        console.warn(socketAllowAllWarning);
+      }
+    });
+  }
 
   createWindow();
 

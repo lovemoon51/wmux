@@ -2,7 +2,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import { mkdir, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import type { SocketRpcErrorCode, SocketRpcRequest, SocketRpcResponse } from "../../shared/types";
+import type { SocketRpcErrorCode, SocketRpcErrorDetails, SocketRpcRequest, SocketRpcResponse } from "../../shared/types";
 
 const maxFrameLength = 1024 * 1024;
 
@@ -14,7 +14,11 @@ export type SocketRpcServer = {
 export type RegisterSocketRpcServerOptions = {
   dispatch: (request: SocketRpcRequest) => Promise<unknown>;
   path?: string;
+  securityMode?: SocketSecurityMode;
+  token?: string;
 };
+
+export type SocketSecurityMode = "off" | "wmuxOnly" | "token" | "allowAll";
 
 export function getDefaultSocketPath(): string {
   if (process.env.WMUX_SOCKET_PATH) {
@@ -29,9 +33,18 @@ export function getDefaultSocketPath(): string {
   return join(tmpdir(), "wmux.sock");
 }
 
-export async function registerSocketRpcServer({ dispatch, path }: RegisterSocketRpcServerOptions): Promise<SocketRpcServer> {
+export async function registerSocketRpcServer({
+  dispatch,
+  path,
+  securityMode = "wmuxOnly",
+  token
+}: RegisterSocketRpcServerOptions): Promise<SocketRpcServer> {
+  if (securityMode === "off") {
+    throw createRpcError("INVALID_STATE", "socket server is disabled");
+  }
+
   const socketPath = path ?? getDefaultSocketPath();
-  const server = createServer((socket) => handleConnection(socket, dispatch));
+  const server = createServer((socket) => handleConnection(socket, dispatch, { securityMode, token }));
 
   if (process.platform !== "win32") {
     await mkdir(dirname(socketPath), { recursive: true });
@@ -54,7 +67,11 @@ export async function registerSocketRpcServer({ dispatch, path }: RegisterSocket
   };
 }
 
-function handleConnection(socket: Socket, dispatch: (request: SocketRpcRequest) => Promise<unknown>): void {
+function handleConnection(
+  socket: Socket,
+  dispatch: (request: SocketRpcRequest) => Promise<unknown>,
+  auth: { securityMode: SocketSecurityMode; token?: string }
+): void {
   socket.setEncoding("utf8");
   let buffer = "";
 
@@ -73,7 +90,7 @@ function handleConnection(socket: Socket, dispatch: (request: SocketRpcRequest) 
       buffer = buffer.slice(newlineIndex + 1);
 
       if (frame) {
-        void handleFrame(socket, frame, dispatch);
+        void handleFrame(socket, frame, dispatch, auth);
       }
 
       newlineIndex = buffer.indexOf("\n");
@@ -84,7 +101,8 @@ function handleConnection(socket: Socket, dispatch: (request: SocketRpcRequest) 
 async function handleFrame(
   socket: Socket,
   frame: string,
-  dispatch: (request: SocketRpcRequest) => Promise<unknown>
+  dispatch: (request: SocketRpcRequest) => Promise<unknown>,
+  auth: { securityMode: SocketSecurityMode; token?: string }
 ): Promise<void> {
   let request: SocketRpcRequest;
 
@@ -97,6 +115,16 @@ async function handleFrame(
 
   if (!request || typeof request.id !== "string" || typeof request.method !== "string") {
     writeResponse(socket, createErrorResponse("unknown", "BAD_REQUEST", "请求必须包含字符串 id 和 method"));
+    return;
+  }
+
+  if (!isAuthorizedRequest(request, auth)) {
+    writeResponse(
+      socket,
+      createErrorResponse(request.id, "UNAUTHORIZED", "socket token missing or invalid", {
+        securityMode: auth.securityMode
+      })
+    );
     return;
   }
 
@@ -113,29 +141,59 @@ async function handleFrame(
   }
 }
 
+function isAuthorizedRequest(
+  request: SocketRpcRequest,
+  { securityMode, token }: { securityMode: SocketSecurityMode; token?: string }
+): boolean {
+  if (securityMode === "allowAll") {
+    return true;
+  }
+
+  if (!token) {
+    return false;
+  }
+
+  return request.auth?.token === token;
+}
+
 function writeResponse(socket: Socket, response: SocketRpcResponse): void {
   socket.write(`${JSON.stringify(response)}\n`);
 }
 
-export function createRpcError(code: SocketRpcErrorCode, message: string): Error & { code: SocketRpcErrorCode } {
-  const error = new Error(message) as Error & { code: SocketRpcErrorCode };
+export function createRpcError(
+  code: SocketRpcErrorCode,
+  message: string,
+  details?: SocketRpcErrorDetails
+): Error & { code: SocketRpcErrorCode; details?: SocketRpcErrorDetails } {
+  const error = new Error(message) as Error & { code: SocketRpcErrorCode; details?: SocketRpcErrorDetails };
   error.code = code;
+  error.details = details;
   return error;
 }
 
 function normalizeError(id: string, error: unknown): SocketRpcResponse {
   if (error instanceof Error && "code" in error && typeof error.code === "string") {
-    return createErrorResponse(id, error.code as SocketRpcErrorCode, error.message);
+    return createErrorResponse(
+      id,
+      error.code as SocketRpcErrorCode,
+      error.message,
+      "details" in error ? (error.details as SocketRpcErrorDetails) : undefined
+    );
   }
 
   return createErrorResponse(id, "INTERNAL", error instanceof Error ? error.message : "内部错误");
 }
 
-function createErrorResponse(id: string, code: SocketRpcErrorCode, message: string): SocketRpcResponse {
+function createErrorResponse(
+  id: string,
+  code: SocketRpcErrorCode,
+  message: string,
+  details?: SocketRpcErrorDetails
+): SocketRpcResponse {
   return {
     id,
     ok: false,
-    error: { code, message }
+    error: { code, message, details }
   };
 }
 

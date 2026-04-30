@@ -37,6 +37,7 @@ import type {
   BrowserRpcMethod,
   BrowserScreenshotParams,
   BrowserSelectorWait,
+  BrowserSurfaceSummary,
   BrowserSnapshotNode,
   BrowserSnapshotParams,
   BrowserSurfaceSelector,
@@ -700,6 +701,7 @@ function isBrowserRpcMethod(method: string): method is BrowserRpcMethod {
     method === "browser.fill" ||
     method === "browser.eval" ||
     method === "browser.snapshot" ||
+    method === "browser.list" ||
     method === "browser.screenshot"
   );
 }
@@ -752,11 +754,53 @@ function getBrowserSurfaces(workspace: Workspace): Array<{ surface: Surface; pan
   );
 }
 
-function resolveBrowserSurface(
+async function createBrowserSurfaceSummaries(
+  workspaces: Workspace[],
+  activeWorkspaceId: string,
+  workspaceId?: string
+): Promise<BrowserSurfaceSummary[]> {
+  const targetWorkspaces = workspaceId ? workspaces.filter((workspace) => workspace.id === workspaceId) : workspaces;
+  return Promise.all(
+    targetWorkspaces.flatMap((workspace) =>
+      getBrowserSurfaces(workspace).map(async ({ surface, paneId }) => {
+        const runtime = browserRuntimes.get(surface.id);
+        const activePane = workspace.panes[workspace.activePaneId];
+        const title = runtime
+          ? await executeBrowserJavaScript<string>(runtime, "document.title", 1000).catch(() => undefined)
+          : undefined;
+        return {
+          surfaceId: surface.id,
+          workspaceId: workspace.id,
+          workspaceName: workspace.name,
+          paneId,
+          active: workspace.id === activeWorkspaceId && activePane?.activeSurfaceId === surface.id,
+          url: runtime?.webview.getURL?.() || surface.subtitle || "about:blank",
+          title
+        };
+      })
+    )
+  );
+}
+
+async function createAmbiguousBrowserError(
+  message: string,
+  workspaces: Workspace[],
+  activeWorkspaceId: string,
+  workspaceId: string,
+  extraDetails?: SocketRpcErrorDetails
+): Promise<Error & { code: SocketRpcErrorCode; details?: SocketRpcErrorDetails }> {
+  return createBrowserError("AMBIGUOUS_TARGET", message, {
+    ...extraDetails,
+    workspaceId,
+    candidates: await createBrowserSurfaceSummaries(workspaces, activeWorkspaceId, workspaceId)
+  });
+}
+
+async function resolveBrowserSurface(
   workspaces: Workspace[],
   activeWorkspaceId: string,
   selector: BrowserSurfaceSelector
-): { surface: Surface; paneId: string; workspace: Workspace } | null {
+): Promise<{ surface: Surface; paneId: string; workspace: Workspace } | null> {
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
   if (!activeWorkspace) {
     throw createBrowserError("INVALID_STATE", "没有可用 workspace");
@@ -797,7 +841,13 @@ function resolveBrowserSurface(
       return { surface: browserSurfaces[0], paneId: pane.id, workspace };
     }
     if (browserSurfaces.length > 1) {
-      throw createBrowserError("AMBIGUOUS_TARGET", "pane 中存在多个 browser surface，请指定 --surface", { paneId: pane.id });
+      throw await createAmbiguousBrowserError(
+        "pane 中存在多个 browser surface，请指定 --surface",
+        workspaces,
+        activeWorkspaceId,
+        workspace.id,
+        { paneId: pane.id }
+      );
     }
     return null;
   }
@@ -811,9 +861,12 @@ function resolveBrowserSurface(
 
   const browserSurfaces = getBrowserSurfaces(targetWorkspace);
   if (!selector.workspaceId && selector.active !== true && browserSurfaces.length > 1) {
-    throw createBrowserError("AMBIGUOUS_TARGET", "当前 workspace 中存在多个 browser surface，请指定 --surface", {
-      workspaceId: targetWorkspace.id
-    });
+    throw await createAmbiguousBrowserError(
+      "当前 workspace 中存在多个 browser surface，请指定 --surface",
+      workspaces,
+      activeWorkspaceId,
+      targetWorkspace.id
+    );
   }
 
   const activePane = targetWorkspace.panes[targetWorkspace.activePaneId];
@@ -830,9 +883,12 @@ function resolveBrowserSurface(
     };
   }
   if (browserSurfaces.length > 1) {
-    throw createBrowserError("AMBIGUOUS_TARGET", "当前 workspace 中存在多个 browser surface，请指定 --surface", {
-      workspaceId: targetWorkspace.id
-    });
+    throw await createAmbiguousBrowserError(
+      "当前 workspace 中存在多个 browser surface，请指定 --surface",
+      workspaces,
+      activeWorkspaceId,
+      targetWorkspace.id
+    );
   }
 
   return null;
@@ -1073,9 +1129,15 @@ async function runBrowserRpc(
   createSurface: (selector: BrowserSurfaceSelector, url: string) => Promise<{ surface: Surface; paneId: string; workspaceId: string }>
 ): Promise<unknown> {
   ensureNoCreateForNonNavigate(method, params);
+  if (method === "browser.list") {
+    const listParams = isRecord(params) ? params : {};
+    const workspaceId = typeof listParams.workspaceId === "string" ? listParams.workspaceId : undefined;
+    return { browsers: await createBrowserSurfaceSummaries(workspaces, activeWorkspaceId, workspaceId) };
+  }
+
   const selector = (isRecord(params) ? params : {}) as BrowserSurfaceSelector;
   const forceCreate = method === "browser.navigate" && isRecord(params) && params.forceCreate === true;
-  let resolved = forceCreate ? null : resolveBrowserSurface(workspaces, activeWorkspaceId, selector);
+  let resolved = forceCreate ? null : await resolveBrowserSurface(workspaces, activeWorkspaceId, selector);
   if ((!resolved || forceCreate) && method === "browser.navigate" && selector.createIfMissing === true) {
     const navigateParams = params as Partial<BrowserNavigateParams>;
     if (typeof navigateParams.url !== "string" || !navigateParams.url.trim()) {
@@ -1229,6 +1291,24 @@ export function App(): ReactElement {
 
   useEffect(() => {
     void window.wmux?.getVersion().then(setAppVersion).catch(() => setAppVersion("dev"));
+    void window.wmux?.getSecurityState?.()
+      .then((state) => {
+        if (state?.mode !== "allowAll" || !state.warning) {
+          return;
+        }
+        setWorkspaces((items) =>
+          items.map((workspace, index) =>
+            index === 0
+              ? {
+                  ...workspace,
+                  status: "attention",
+                  notice: state.warning
+                }
+              : workspace
+          )
+        );
+      })
+      .catch(() => undefined);
     void window.wmux?.terminal
       .listShells()
       .then((options) => {

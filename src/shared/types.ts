@@ -70,12 +70,16 @@ export type SocketRpcMethod =
 export type SocketRpcRequest = {
   id: string;
   method: SocketRpcMethod | string;
+  auth?: {
+    token?: string;
+  };
   params?: unknown;
 };
 
 export type SocketRpcErrorCode =
   | "BAD_REQUEST"
   | "METHOD_NOT_FOUND"
+  | "UNAUTHORIZED"
   | "INVALID_STATE"
   | "NOT_FOUND"
   | "SURFACE_TYPE_MISMATCH"
@@ -140,6 +144,7 @@ export type BrowserRpcMethod =
   | "browser.fill"
   | "browser.eval"
   | "browser.snapshot"
+  | "browser.list"
   | "browser.screenshot";
 
 export type BrowserWaitUntil = "none" | "domcontentloaded" | "load";
@@ -152,6 +157,16 @@ export type BrowserSurfaceSelector = {
   workspaceId?: string;
   active?: boolean;
   createIfMissing?: boolean;
+};
+
+export type BrowserSurfaceSummary = {
+  surfaceId: string;
+  workspaceId: string;
+  workspaceName: string;
+  paneId: string;
+  active: boolean;
+  url: string;
+  title?: string;
 };
 
 export type BrowserNavigateParams = BrowserSurfaceSelector & {
@@ -205,13 +220,18 @@ export type BrowserScreenshotParams = BrowserSurfaceSelector & {
   timeoutMs?: number;
 };
 
+export type BrowserListParams = {
+  workspaceId?: string;
+};
+
 export type BrowserRpcParams =
   | BrowserNavigateParams
   | BrowserClickParams
   | BrowserFillParams
   | BrowserEvalParams
   | BrowserSnapshotParams
-  | BrowserScreenshotParams;
+  | BrowserScreenshotParams
+  | BrowserListParams;
 
 export type ShellProfileOption = {
   id: ShellProfile;

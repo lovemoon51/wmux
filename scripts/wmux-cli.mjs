@@ -28,6 +28,7 @@ function printUsage() {
   wmux notify --title <title> [--body <body>] [--json]
   wmux browser navigate <url> [--surface <id>] [--create] [--wait load|domcontentloaded|none] [--timeout <ms>] [--json]
   wmux browser open <url> [--json]
+  wmux browser list [--json]
   wmux browser click <selector> [--timeout <ms>] [--wait visible|attached|none] [--json]
   wmux browser fill <selector> <text> [--text <text>] [--text-file <path>] [--json]
   wmux browser eval <script> [--json]
@@ -125,6 +126,15 @@ function createBrowserRequest() {
         ...(parseOption("--wait") ? { wait: parseOption("--wait") } : {}),
         ...(parseOption("--load-wait") ? { waitUntil: parseOption("--load-wait") } : {}),
         ...(readTimeout() ? { timeoutMs: readTimeout() } : {})
+      }
+    };
+  }
+
+  if (browserCommand === "list") {
+    return {
+      method: "browser.list",
+      params: {
+        ...(parseOption("--workspace") ? { workspaceId: parseOption("--workspace") } : {})
       }
     };
   }
@@ -237,6 +247,9 @@ function requestSocket(payload) {
   const socketPath = getDefaultSocketPath();
   const request = {
     id: `cli-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    auth: {
+      token: process.env.WMUX_SOCKET_TOKEN
+    },
     ...payload
   };
 
@@ -293,6 +306,16 @@ function requestSocket(payload) {
 function printBrowserResult(result) {
   const browserCommand = args[1];
   const outPath = parseOption("--out");
+  if (browserCommand === "list") {
+    for (const browser of result?.browsers ?? []) {
+      const activePrefix = browser.active ? "*" : " ";
+      const title = browser.title ? `\t${browser.title}` : "";
+      console.log(
+        `${activePrefix} ${browser.surfaceId}\t${browser.workspaceId}\t${browser.workspaceName}\t${browser.paneId}\t${browser.url}${title}`
+      );
+    }
+    return;
+  }
   if (browserCommand === "snapshot" && outPath && typeof result?.snapshot === "string") {
     return writeFileAndPrint(outPath, result.snapshot);
   }
@@ -370,6 +393,22 @@ try {
   printResult(result);
 } catch (error) {
   printUsage();
+  if (error?.code) {
+    console.error(error.code);
+  }
   console.error(error instanceof Error ? error.message : String(error));
+  if (error?.code === "UNAUTHORIZED") {
+    const mode = error?.details?.securityMode ? ` 当前安全模式：${error.details.securityMode}。` : "";
+    console.error(`请在 wmux 内 terminal 运行，或显式设置 WMUX_SOCKET_TOKEN。${mode}`);
+  }
+  const candidates = error?.details?.candidates;
+  if (error?.code === "AMBIGUOUS_TARGET" && Array.isArray(candidates) && candidates.length > 0) {
+    console.error("可用 browser surfaces：");
+    for (const candidate of candidates) {
+      console.error(
+        `  --surface ${candidate.surfaceId}  ${candidate.workspaceName ?? candidate.workspaceId} / ${candidate.paneId}  ${candidate.url ?? ""}`
+      );
+    }
+  }
   process.exit(typeof error?.cliExitCode === "number" ? error.cliExitCode : 1);
 }

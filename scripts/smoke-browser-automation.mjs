@@ -10,6 +10,11 @@ const outputDir = resolve("output/playwright");
 const smokeUserDataPath = resolve(outputDir, "wmux-browser-smoke-user-data");
 const smokeSocketPath =
   process.platform === "win32" ? "\\\\.\\pipe\\wmux-browser-smoke" : resolve(outputDir, "wmux-browser-smoke.sock");
+const smokeSocketToken = "wmux-browser-smoke-token";
+const allowAllSocketPath =
+  process.platform === "win32" ? "\\\\.\\pipe\\wmux-browser-smoke-allow-all" : resolve(outputDir, "wmux-browser-smoke-allow-all.sock");
+const offSocketPath =
+  process.platform === "win32" ? "\\\\.\\pipe\\wmux-browser-smoke-off" : resolve(outputDir, "wmux-browser-smoke-off.sock");
 const screenshotPath = resolve(outputDir, "browser-automation-smoke.png");
 
 mkdirSync(outputDir, { recursive: true });
@@ -20,14 +25,16 @@ function log(message) {
   console.log(message);
 }
 
-async function launchApp() {
+async function launchApp({ socketPath = smokeSocketPath, securityMode = "wmuxOnly", token = smokeSocketToken } = {}) {
   return electron.launch({
     executablePath: electronPath,
     args: ["out/main/index.js"],
     env: {
       ...process.env,
       WMUX_USER_DATA_DIR: smokeUserDataPath,
-      WMUX_SOCKET_PATH: smokeSocketPath
+      WMUX_SOCKET_PATH: socketPath,
+      ...(token ? { WMUX_SOCKET_TOKEN: token } : {}),
+      WMUX_SECURITY_MODE: securityMode
     }
   });
 }
@@ -40,12 +47,19 @@ async function getReadyWindow(app) {
 }
 
 async function runCli(args, options = {}) {
+  const tokenEnv =
+    options.token === null
+      ? {}
+      : {
+          WMUX_SOCKET_TOKEN: options.token ?? smokeSocketToken
+        };
   try {
     const result = await execFileAsync(process.execPath, ["scripts/wmux-cli.mjs", ...args], {
       cwd: process.cwd(),
       env: {
         ...process.env,
-        WMUX_SOCKET_PATH: smokeSocketPath
+        WMUX_SOCKET_PATH: options.socketPath ?? smokeSocketPath,
+        ...tokenEnv
       },
       timeout: 20_000
     });
@@ -79,14 +93,74 @@ const smokeUrl = `data:text/html,${smokeHtml}`;
 let app;
 
 try {
+  app = await launchApp({ socketPath: allowAllSocketPath, securityMode: "allowAll", token: null });
+  const allowAllWindow = await getReadyWindow(app);
+  const allowAllPing = await runCli(["ping"], { socketPath: allowAllSocketPath, token: null });
+  if (!allowAllPing.stdout.includes("pong")) {
+    throw new Error(`allowAll should allow ping without token: ${JSON.stringify(allowAllPing)}`);
+  }
+  await allowAllWindow.waitForFunction(() => document.body.textContent?.includes("WMUX_SECURITY_MODE=allowAll"), null, {
+    timeout: 15_000
+  });
+  log("ok browser auth allowAll warning and no-token ping");
+  await Promise.race([app.close(), new Promise((resolvePromise) => setTimeout(resolvePromise, 3_000))]);
+  app = undefined;
+
+  app = await launchApp({ socketPath: offSocketPath, securityMode: "off", token: null });
+  await getReadyWindow(app);
+  const offPing = await runCli(["ping"], { allowFailure: true, socketPath: offSocketPath, token: null });
+  if (offPing.code !== 3) {
+    throw new Error(`off mode should not start socket: ${JSON.stringify(offPing)}`);
+  }
+  log("ok browser auth off disables socket");
+  await Promise.race([app.close(), new Promise((resolvePromise) => setTimeout(resolvePromise, 3_000))]);
+  app = undefined;
+
   app = await launchApp();
   await getReadyWindow(app);
+
+  const noToken = await runCli(["ping"], { allowFailure: true, token: null });
+  if (noToken.code !== 1 || !noToken.stderr.includes("UNAUTHORIZED")) {
+    throw new Error(`missing token should be unauthorized: ${JSON.stringify(noToken)}`);
+  }
+  log("ok browser auth missing token rejected");
+
+  const wrongToken = await runCli(["ping"], { allowFailure: true, token: "wrong-token" });
+  if (wrongToken.code !== 1 || !wrongToken.stderr.includes("UNAUTHORIZED")) {
+    throw new Error(`wrong token should be unauthorized: ${JSON.stringify(wrongToken)}`);
+  }
+  log("ok browser auth wrong token rejected");
+
+  const ping = await runCli(["ping"]);
+  if (!ping.stdout.includes("pong")) {
+    throw new Error(`correct token should ping: ${JSON.stringify(ping)}`);
+  }
+  log("ok browser auth correct token");
+
+  const workspaces = await runCli(["list-workspaces"]);
+  if (!workspaces.stdout.includes("API Server")) {
+    throw new Error(`list-workspaces should succeed with token: ${JSON.stringify(workspaces)}`);
+  }
+  log("ok browser auth list-workspaces with token");
+
+  const notify = await runCli(["notify", "--title", "WMUX_TOKEN_NOTIFY", "--body", "socket smoke"]);
+  if (!notify.stdout.includes("notified")) {
+    throw new Error(`notify should succeed with token: ${JSON.stringify(notify)}`);
+  }
+  log("ok browser auth notify with token");
 
   const navigate = parseJson((await runCli(["browser", "navigate", smokeUrl, "--create", "--json"])).stdout);
   if (!navigate.surfaceId || !navigate.url.startsWith("data:text/html")) {
     throw new Error(`navigate failed: ${JSON.stringify(navigate)}`);
   }
   log("ok browser navigate");
+
+  const list = parseJson((await runCli(["browser", "list", "--json"])).stdout);
+  const listedBrowser = list.browsers?.find((browser) => browser.surfaceId === navigate.surfaceId);
+  if (!listedBrowser || listedBrowser.workspaceId !== navigate.workspaceId || listedBrowser.paneId !== navigate.paneId) {
+    throw new Error(`browser list did not include navigated surface: ${JSON.stringify(list)}`);
+  }
+  log("ok browser list");
 
   const snapshot = parseJson((await runCli(["browser", "snapshot", "--surface", navigate.surfaceId, "--json"])).stdout);
   const snapshotText = JSON.stringify(snapshot);
@@ -137,7 +211,12 @@ try {
     throw new Error(`second browser was not created: ${JSON.stringify(second)}`);
   }
   const ambiguous = await runCli(["browser", "snapshot"], { allowFailure: true });
-  if (ambiguous.code !== 1 || !ambiguous.stderr.includes("多个 browser surface")) {
+  if (
+    ambiguous.code !== 1 ||
+    !ambiguous.stderr.includes("多个 browser surface") ||
+    !ambiguous.stderr.includes(`--surface ${navigate.surfaceId}`) ||
+    !ambiguous.stderr.includes(`--surface ${second.surfaceId}`)
+  ) {
     throw new Error(`ambiguous target did not fail as expected: ${JSON.stringify(ambiguous)}`);
   }
   parseJson((await runCli(["browser", "snapshot", "--surface", navigate.surfaceId, "--json"])).stdout);

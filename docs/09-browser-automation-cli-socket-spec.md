@@ -6,6 +6,7 @@
 
 P0 覆盖：
 
+- `list`
 - `navigate`
 - `click`
 - `fill`
@@ -178,7 +179,40 @@ forwardTimeoutMs = Math.max((params.timeoutMs ?? methodDefaultTimeoutMs) + 1000,
 
 ## 7. Socket methods
 
-### 7.1 `browser.navigate`
+### 7.1 `browser.list`
+
+Params:
+
+```ts
+{
+  workspaceId?: string;
+}
+```
+
+Result:
+
+```ts
+{
+  browsers: Array<{
+    surfaceId: string;
+    workspaceId: string;
+    workspaceName: string;
+    paneId: string;
+    active: boolean;
+    url: string;
+    title?: string;
+  }>;
+}
+```
+
+CLI:
+
+```bash
+wmux browser list
+wmux browser list --json
+```
+
+### 7.2 `browser.navigate`
 
 Params:
 
@@ -235,7 +269,7 @@ CLI alias:
 - 不新增 socket method `browser.open`。
 - alias 只存在于 CLI 层，socket 仍发送 `method: "browser.navigate"` 和 `createIfMissing: true`。
 
-### 7.2 `browser.click`
+### 7.3 `browser.click`
 
 Params:
 
@@ -281,7 +315,7 @@ wmux browser click "#login" --timeout 8000
 wmux browser click ".nav a:first-child" --wait attached
 ```
 
-### 7.3 `browser.fill`
+### 7.4 `browser.fill`
 
 Params:
 
@@ -332,7 +366,7 @@ CLI 规则：
 - `--text-file` 从 UTF-8 文件读取文本。
 - 同时传位置文本、`--text`、`--text-file` 时返回 CLI 使用错误。
 
-### 7.4 `browser.eval`
+### 7.5 `browser.eval`
 
 Params:
 
@@ -385,7 +419,7 @@ CLI 输出：
 - 默认输出 `value` 的文本形式。
 - `--json` 输出完整 socket result JSON。
 
-### 7.5 `browser.snapshot`
+### 7.6 `browser.snapshot`
 
 Params:
 
@@ -464,7 +498,7 @@ Errors:
 - `TIMEOUT`: snapshot 等待超时。
 - `BROWSER_ERROR`: DOM snapshot 失败。
 
-### 7.6 `browser.screenshot`
+### 7.7 `browser.screenshot`
 
 Params:
 
@@ -579,8 +613,11 @@ INTERNAL
   url?: string;
   timeoutMs?: number;
   method?: string;
+  candidates?: BrowserSurfaceSummary[];
 }
 ```
+
+`AMBIGUOUS_TARGET` 必须返回 `details.candidates`，用于 CLI 提示可复制的 `--surface <id>`。
 
 ## 10. 本地验收脚本
 
@@ -601,15 +638,16 @@ INTERNAL
 3. 使用独立 `WMUX_SOCKET_PATH`
 4. 启动 Electron 生产构建。
 5. CLI 调 `wmux browser navigate "data:text/html,..."`
-6. CLI 调 `wmux browser snapshot --json`，断言包含页面标题和按钮。
-7. CLI 调 `wmux browser fill "#name" "wmux"`，再 `eval "document.querySelector('#name').value"`，断言为 `wmux`。
-8. CLI 调 `wmux browser click "#submit"`，断言页面显示 `clicked: wmux`。
-9. CLI 调 `wmux browser eval "document.body.dataset.clicked"`，断言为 `wmux`。
-10. CLI 调 `wmux browser screenshot --out output/playwright/browser-automation-smoke.png`，断言文件存在且大于 1KB。
-11. CLI 调 `wmux browser screenshot --base64 --json`，断言 `mimeType` 和 `base64` 存在。
-12. 创建第二个 browser surface 后调用 `wmux browser snapshot`，断言返回 `AMBIGUOUS_TARGET`；再用 `--surface` 精确指定并成功。
-13. 调用 `wmux browser click "#submit" --create`，断言 CLI exit code 为 `2`。
-14. 关闭 Electron，清理临时 userData。
+6. CLI 调 `wmux browser list --json`，断言包含当前 browser surface。
+7. CLI 调 `wmux browser snapshot --json`，断言包含页面标题和按钮。
+8. CLI 调 `wmux browser fill "#name" "wmux"`，再 `eval "document.querySelector('#name').value"`，断言为 `wmux`。
+9. CLI 调 `wmux browser click "#submit"`，断言页面显示 `clicked: wmux`。
+10. CLI 调 `wmux browser eval "document.body.dataset.clicked"`，断言为 `wmux`。
+11. CLI 调 `wmux browser screenshot --out output/playwright/browser-automation-smoke.png`，断言文件存在且大于 1KB。
+12. CLI 调 `wmux browser screenshot --base64 --json`，断言 `mimeType` 和 `base64` 存在。
+13. 创建第二个 browser surface 后调用 `wmux browser snapshot`，断言返回 `AMBIGUOUS_TARGET` 且 CLI 输出候选 `--surface <id>`；再用 `--surface` 精确指定并成功。
+14. 调用 `wmux browser click "#submit" --create`，断言 CLI exit code 为 `2`。
+15. 关闭 Electron，清理临时 userData。
 
 测试页面：
 
@@ -628,6 +666,7 @@ INTERNAL
 
 ```text
 ok browser navigate
+ok browser list
 ok browser snapshot
 ok browser fill
 ok browser click

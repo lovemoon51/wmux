@@ -10,6 +10,8 @@ import type {
 
 const api = {
   getVersion: (): Promise<string> => ipcRenderer.invoke("app:version"),
+  getSecurityState: (): Promise<{ mode: "off" | "wmuxOnly" | "token" | "allowAll"; warning?: string }> =>
+    ipcRenderer.invoke("app:securityState"),
   config: {
     loadProjectConfig: (): Promise<WmuxProjectConfigResult> => ipcRenderer.invoke("config:loadProjectConfig")
   },
