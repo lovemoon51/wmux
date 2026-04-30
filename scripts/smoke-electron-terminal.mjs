@@ -236,6 +236,49 @@ async function runKeyboardShortcutSmoke(window) {
   log("ok shortcut workspace switch");
 }
 
+async function runCompactLayoutSmoke(window) {
+  log("compact layout");
+  await window.setViewportSize({ width: 1280, height: 800 });
+  await window.getByLabel("Open workspace API Server").click();
+  await window.getByRole("heading", { name: "API Server" }).waitFor({ timeout: 15_000 });
+
+  const metrics = await window.evaluate(() => {
+    const viewportWidth = document.documentElement.clientWidth;
+    const offenders = [...document.querySelectorAll(".titleBar, .surfaceTabs, .surfaceTab, .toolbarButton, .commandButton, .shellSelectLabel")].flatMap(
+      (element) => {
+        const rect = element.getBoundingClientRect();
+        const overflowX = Math.ceil(element.scrollWidth - element.clientWidth);
+        const outsideViewport = rect.left < -1 || rect.right > viewportWidth + 1;
+        if (overflowX > 1 || outsideViewport) {
+          return [
+            {
+              className: element.className,
+              text: element.textContent?.trim().slice(0, 80),
+              overflowX,
+              left: Math.round(rect.left),
+              right: Math.round(rect.right),
+              viewportWidth
+            }
+          ];
+        }
+
+        return [];
+      }
+    );
+
+    return {
+      bodyOverflowX: Math.ceil(document.documentElement.scrollWidth - document.documentElement.clientWidth),
+      offenders
+    };
+  });
+
+  if (metrics.bodyOverflowX > 1 || metrics.offenders.length > 0) {
+    throw new Error(`Compact layout overflow: ${JSON.stringify(metrics)}`);
+  }
+
+  log("ok compact layout");
+}
+
 async function runTerminalCommand(window, command, expectedText) {
   log(`run ${command}`);
   await window.locator(".paneActive .surfaceBodyFrameActive .terminalHost").click();
@@ -658,6 +701,7 @@ try {
   await runWorkspaceInspectionSmoke(window, smokePortServer.port);
   await runSettingsSmoke(window);
   await runKeyboardShortcutSmoke(window);
+  await runCompactLayoutSmoke(window);
   await runCliSocketSmoke(window);
   await runWorkspaceCrud(window);
   await runSplitCrud(window);

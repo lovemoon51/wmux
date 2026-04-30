@@ -431,9 +431,16 @@ kbd {
   gap: 10px;
 }
 
+.titleIdentity > div {
+  min-width: 0;
+}
+
 .titleIdentity h1 {
+  overflow: hidden;
   margin: 0;
   font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .titleIdentity p {
@@ -448,6 +455,7 @@ kbd {
 
 .titleActions {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 8px;
 }
@@ -466,6 +474,7 @@ kbd {
 
 .shellSelectLabel {
   display: inline-flex;
+  min-width: 0;
   align-items: center;
   gap: 6px;
   border: 1px solid var(--border-subtle);
@@ -619,6 +628,7 @@ kbd {
 .surfaceTab {
   display: inline-flex;
   min-width: 0;
+  flex: 1 1 82px;
   max-width: 190px;
   height: 25px;
   align-items: center;
@@ -631,7 +641,13 @@ kbd {
   font-size: 12px;
 }
 
+.surfaceTab svg,
+.surfaceTab .tabStatus {
+  flex: none;
+}
+
 .surfaceTab span:last-of-type {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1085,8 +1101,12 @@ kbd {
 }
 
 @media (max-width: 1280px) {
+  .appShell {
+    grid-template-columns: 252px minmax(0, 1fr);
+  }
+
   .titleIdentity p {
-    max-width: 320px;
+    max-width: 250px;
   }
 
   .titleActions {
@@ -1097,6 +1117,14 @@ kbd {
   .commandButton,
   .shellSelectLabel {
     padding: 0 8px;
+  }
+
+  .shellSelectLabel select {
+    max-width: 108px;
+  }
+
+  .surfaceTab {
+    max-width: 150px;
   }
 }
 

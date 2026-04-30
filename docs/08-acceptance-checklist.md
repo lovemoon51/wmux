@@ -39,7 +39,7 @@
 ## 3. 体验验收
 
 - [x] 1440x900 下 sidebar、terminal、browser 不拥挤。
-- [ ] 1280x800 下按钮和 tab 文本不溢出。
+- [x] 1280x800 下按钮和 tab 文本不溢出。
 - [x] 分屏拖拽时不会明显卡顿。
 - [ ] 创建 8 个 terminal surface 后输入仍流畅。
 - [ ] 创建 4 个 workspace 后切换无明显延迟。
