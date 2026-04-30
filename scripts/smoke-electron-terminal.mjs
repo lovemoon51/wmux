@@ -172,6 +172,16 @@ async function runWorkspaceInspectionSmoke(window, expectedPort) {
   log("ok workspace inspection");
 }
 
+async function runSettingsSmoke(window) {
+  log("settings");
+  await window.getByRole("button", { name: "Settings" }).click();
+  await window.getByLabel("Settings panel").waitFor({ timeout: 15_000 });
+  await window.getByLabel("Socket security mode").selectOption("token");
+  await window.getByRole("button", { name: "Save" }).click();
+  await window.getByText("restart required").waitFor({ timeout: 15_000 });
+  log("ok settings socket security");
+}
+
 async function runTerminalCommand(window, command, expectedText) {
   log(`run ${command}`);
   await window.locator(".paneActive .surfaceBodyFrameActive .terminalHost").click();
@@ -588,6 +598,7 @@ try {
   log(`shell options ${JSON.stringify(shellOptions)}`);
 
   await runWorkspaceInspectionSmoke(window, smokePortServer.port);
+  await runSettingsSmoke(window);
   await runCliSocketSmoke(window);
   await runWorkspaceCrud(window);
   await runSplitCrud(window);

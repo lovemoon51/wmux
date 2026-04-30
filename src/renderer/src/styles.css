@@ -358,6 +358,53 @@ kbd {
   color: var(--text-secondary);
 }
 
+.settingsPanel {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: #11151a;
+  padding: 9px;
+}
+
+.settingsField {
+  display: grid;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.settingsField select {
+  height: 28px;
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  outline: 0;
+  background: var(--bg-control);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.settingsField option {
+  background: #1b1f26;
+  color: var(--text-primary);
+}
+
+.settingsMeta,
+.settingsWarning {
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.settingsWarning {
+  color: var(--warning);
+}
+
+.settingsSaveButton {
+  justify-content: center;
+}
+
 .workspaceArea {
   display: grid;
   min-width: 0;

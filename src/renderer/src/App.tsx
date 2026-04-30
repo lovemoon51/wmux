@@ -54,6 +54,8 @@ import type {
   SocketRpcMethod,
   SocketRpcRequest,
   SocketRpcResponse,
+  SocketSecurityMode,
+  SocketSecuritySettings,
   Surface,
   WmuxCommandConfig,
   WmuxLayoutConfig,
@@ -375,6 +377,15 @@ const statusClass: Record<WorkspaceStatus, string> = {
   success: "statusSuccess",
   error: "statusError"
 };
+
+const socketSecurityModeLabels: Record<SocketSecurityMode, string> = {
+  off: "Off",
+  wmuxOnly: "wmuxOnly",
+  token: "Token",
+  allowAll: "allowAll"
+};
+
+const socketSecurityModes: SocketSecurityMode[] = ["wmuxOnly", "token", "off", "allowAll"];
 
 const initialWorkspaces: Workspace[] = [
   {
@@ -1449,12 +1460,21 @@ export function App(): ReactElement {
   const [commandQuery, setCommandQuery] = useState("");
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [pendingTerminalCommands, setPendingTerminalCommands] = useState<PendingTerminalCommand[]>([]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [securitySettings, setSecuritySettings] = useState<SocketSecuritySettings | null>(null);
+  const [securityModeDraft, setSecurityModeDraft] = useState<SocketSecurityMode>("wmuxOnly");
 
   useEffect(() => {
     void window.wmux?.getVersion().then(setAppVersion).catch(() => setAppVersion("dev"));
     void window.wmux?.getSecurityState?.()
       .then((state) => {
-        if (state?.mode !== "allowAll" || !state.warning) {
+        if (!state) {
+          return;
+        }
+
+        setSecuritySettings(state);
+        setSecurityModeDraft(state.configuredMode);
+        if (state.activeMode !== "allowAll" || !state.warning) {
           return;
         }
         setWorkspaces((items) =>
@@ -1751,6 +1771,16 @@ export function App(): ReactElement {
       runSimpleCommand(command);
     }
     closeCommandPalette();
+  };
+
+  const handleSaveSecurityMode = (): void => {
+    void window.wmux
+      ?.setSecurityMode(securityModeDraft)
+      .then((settings) => {
+        setSecuritySettings(settings);
+        setSecurityModeDraft(settings.configuredMode);
+      })
+      .catch(() => undefined);
   };
 
   const updateActiveWorkspace = (updater: (workspace: Workspace) => Workspace): void => {
@@ -2335,6 +2365,12 @@ export function App(): ReactElement {
         onCancelRename={handleCancelRenameWorkspace}
         onClose={handleCloseWorkspace}
         onOpenCommandPalette={openCommandPalette}
+        settingsOpen={settingsOpen}
+        securityModeDraft={securityModeDraft}
+        securitySettings={securitySettings}
+        onToggleSettings={() => setSettingsOpen((isOpen) => !isOpen)}
+        onSecurityModeDraftChange={setSecurityModeDraft}
+        onSaveSecurityMode={handleSaveSecurityMode}
       />
       <section className="workspaceArea">
         <TitleBar
@@ -2520,7 +2556,13 @@ function WorkspaceSidebar({
   onCommitRename,
   onCancelRename,
   onClose,
-  onOpenCommandPalette
+  onOpenCommandPalette,
+  settingsOpen,
+  securityModeDraft,
+  securitySettings,
+  onToggleSettings,
+  onSecurityModeDraftChange,
+  onSaveSecurityMode
 }: {
   workspaces: Workspace[];
   activeWorkspaceId: string;
@@ -2534,6 +2576,12 @@ function WorkspaceSidebar({
   onCancelRename: () => void;
   onClose: (id: string) => void;
   onOpenCommandPalette: () => void;
+  settingsOpen: boolean;
+  securityModeDraft: SocketSecurityMode;
+  securitySettings: SocketSecuritySettings | null;
+  onToggleSettings: () => void;
+  onSecurityModeDraftChange: (mode: SocketSecurityMode) => void;
+  onSaveSecurityMode: () => void;
 }): ReactElement {
   return (
     <aside className="sidebar">
@@ -2689,10 +2737,38 @@ function WorkspaceSidebar({
           <Bell size={15} />
           <span>Notifications</span>
         </button>
-        <button className="utilityButton" type="button">
+        <button className="utilityButton" type="button" aria-expanded={settingsOpen} onClick={onToggleSettings}>
           <Settings size={15} />
           <span>Settings</span>
         </button>
+        {settingsOpen && (
+          <div className="settingsPanel" aria-label="Settings panel">
+            <label className="settingsField">
+              <span>Socket security</span>
+              <select
+                aria-label="Socket security mode"
+                value={securityModeDraft}
+                onChange={(event) => onSecurityModeDraftChange(event.target.value as SocketSecurityMode)}
+              >
+                {socketSecurityModes.map((mode) => (
+                  <option key={mode} value={mode}>
+                    {socketSecurityModeLabels[mode]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="settingsMeta">
+              Active: {socketSecurityModeLabels[securitySettings?.activeMode ?? "wmuxOnly"]}
+              {securitySettings?.pendingRestart ? " / restart required" : ""}
+            </div>
+            {securityModeDraft === "allowAll" && (
+              <div className="settingsWarning">allowAll accepts local socket requests without token.</div>
+            )}
+            <button className="utilityButton settingsSaveButton" type="button" onClick={onSaveSecurityMode}>
+              Save
+            </button>
+          </div>
+        )}
       </div>
     </aside>
   );

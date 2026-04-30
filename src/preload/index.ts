@@ -5,14 +5,17 @@ import type {
   ShellProfileOption,
   SocketRpcRequest,
   SocketRpcResponse,
+  SocketSecurityMode,
+  SocketSecuritySettings,
   WmuxProjectConfigResult,
   WorkspaceInspection
 } from "../shared/types";
 
 const api = {
   getVersion: (): Promise<string> => ipcRenderer.invoke("app:version"),
-  getSecurityState: (): Promise<{ mode: "off" | "wmuxOnly" | "token" | "allowAll"; warning?: string }> =>
-    ipcRenderer.invoke("app:securityState"),
+  getSecurityState: (): Promise<SocketSecuritySettings> => ipcRenderer.invoke("app:securityState"),
+  setSecurityMode: (mode: SocketSecurityMode): Promise<SocketSecuritySettings> =>
+    ipcRenderer.invoke("app:setSecurityMode", mode),
   config: {
     loadProjectConfig: (): Promise<WmuxProjectConfigResult> => ipcRenderer.invoke("config:loadProjectConfig")
   },

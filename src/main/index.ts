@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, nativeTheme, shell } from "electron";
 import { randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -10,12 +11,13 @@ import {
   createRpcError,
   getDefaultSocketPath,
   registerSocketRpcServer,
-  type SocketRpcServer,
-  type SocketSecurityMode
+  type SocketRpcServer
 } from "./socket/rpcServer";
 import type {
   BrowserRpcMethod,
   PersistedAppState,
+  SocketSecurityMode,
+  SocketSecuritySettings,
   SocketRpcRequest,
   SocketRpcResponse,
   WmuxCommandConfig,
@@ -30,6 +32,12 @@ import type {
 const isDev = !app.isPackaged;
 const execFileAsync = promisify(execFile);
 const userDataDir = process.env.WMUX_USER_DATA_DIR;
+if (userDataDir) {
+  app.setPath("userData", userDataDir);
+} else if (process.env.WMUX_SMOKE === "1") {
+  app.setPath("userData", join(tmpdir(), "wmux-smoke"));
+}
+
 const socketPath = getDefaultSocketPath();
 const socketSecurityMode = readSocketSecurityMode();
 const socketToken = process.env.WMUX_SOCKET_TOKEN || randomBytes(32).toString("hex");
@@ -48,23 +56,55 @@ process.env.WMUX_SOCKET_PATH = socketPath;
 process.env.WMUX_SOCKET_TOKEN = socketToken;
 process.env.WMUX_SECURITY_MODE = socketSecurityMode;
 
-if (userDataDir) {
-  app.setPath("userData", userDataDir);
-} else if (process.env.WMUX_SMOKE === "1") {
-  app.setPath("userData", join(tmpdir(), "wmux-smoke"));
-}
-
 function getStatePath(): string {
   return join(app.getPath("userData"), "workspace-state.json");
 }
 
+function getSettingsPath(): string {
+  return join(app.getPath("userData"), "settings.json");
+}
+
+function isSocketSecurityMode(value: unknown): value is SocketSecurityMode {
+  return value === "off" || value === "wmuxOnly" || value === "token" || value === "allowAll";
+}
+
 function readSocketSecurityMode(): SocketSecurityMode {
   const value = process.env.WMUX_SECURITY_MODE;
-  if (value === "off" || value === "wmuxOnly" || value === "token" || value === "allowAll") {
+  if (isSocketSecurityMode(value)) {
     return value;
   }
 
-  return "wmuxOnly";
+  return readConfiguredSocketSecurityMode() ?? "wmuxOnly";
+}
+
+function readConfiguredSocketSecurityMode(): SocketSecurityMode | undefined {
+  try {
+    if (!existsSync(getSettingsPath())) {
+      return undefined;
+    }
+    const settings = JSON.parse(readFileSync(getSettingsPath(), "utf8")) as unknown;
+    if (isRecord(settings) && isSocketSecurityMode(settings.socketSecurityMode)) {
+      return settings.socketSecurityMode;
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+}
+
+async function writeConfiguredSocketSecurityMode(mode: SocketSecurityMode): Promise<void> {
+  await mkdir(app.getPath("userData"), { recursive: true });
+  await writeFile(getSettingsPath(), `${JSON.stringify({ socketSecurityMode: mode }, null, 2)}\n`, "utf8");
+}
+
+function getSocketSecuritySettings(configuredMode = readConfiguredSocketSecurityMode() ?? socketSecurityMode): SocketSecuritySettings {
+  return {
+    activeMode: socketSecurityMode,
+    configuredMode,
+    pendingRestart: configuredMode !== socketSecurityMode,
+    warning: configuredMode === "allowAll" ? socketAllowAllWarning : undefined
+  };
 }
 
 function normalizePathForCompare(path: string): string {
@@ -497,10 +537,15 @@ app.whenReady().then(() => {
   nativeTheme.themeSource = "dark";
 
   ipcMain.handle("app:version", () => app.getVersion());
-  ipcMain.handle("app:securityState", () => ({
-    mode: socketSecurityMode,
-    warning: socketSecurityMode === "allowAll" ? socketAllowAllWarning : undefined
-  }));
+  ipcMain.handle("app:securityState", () => getSocketSecuritySettings());
+  ipcMain.handle("app:setSecurityMode", async (_event, mode: SocketSecurityMode): Promise<SocketSecuritySettings> => {
+    if (!isSocketSecurityMode(mode)) {
+      throw createRpcError("BAD_REQUEST", "invalid socket security mode");
+    }
+
+    await writeConfiguredSocketSecurityMode(mode);
+    return getSocketSecuritySettings(mode);
+  });
   ipcMain.handle("config:loadProjectConfig", () => loadProjectConfig());
   ipcMain.handle("workspace:loadState", async (): Promise<PersistedAppState | null> => {
     try {

@@ -4,6 +4,15 @@ export type SurfaceType = "terminal" | "browser";
 
 export type ShellProfile = "auto" | "pwsh" | "powershell" | "cmd" | "bash" | "zsh";
 
+export type SocketSecurityMode = "off" | "wmuxOnly" | "token" | "allowAll";
+
+export type SocketSecuritySettings = {
+  activeMode: SocketSecurityMode;
+  configuredMode: SocketSecurityMode;
+  pendingRestart: boolean;
+  warning?: string;
+};
+
 export type WmuxSurfaceConfig =
   | {
       type: "terminal";
