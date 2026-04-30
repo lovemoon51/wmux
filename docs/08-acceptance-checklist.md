@@ -41,7 +41,7 @@
 - [x] 1440x900 下 sidebar、terminal、browser 不拥挤。
 - [x] 1280x800 下按钮和 tab 文本不溢出。
 - [x] 分屏拖拽时不会明显卡顿。
-- [ ] 创建 8 个 terminal surface 后输入仍流畅。
+- [x] 创建 8 个 terminal surface 后输入仍流畅。
 - [x] 创建 4 个 workspace 后切换无明显延迟。
 - [x] Browser surface 与 terminal surface 混排时焦点行为清晰。
 - [x] Browser webview 高度与 pane 视口一致，不只渲染局部。

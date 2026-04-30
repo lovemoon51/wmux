@@ -323,6 +323,41 @@ async function runTerminalCommand(window, command, expectedText) {
   log(`ok ${command}`);
 }
 
+async function runEightTerminalSurfaceLatencySmoke(window) {
+  log("eight terminal surface latency");
+  await window.getByLabel("Open workspace API Server").click();
+  await window.getByRole("heading", { name: "API Server" }).waitFor({ timeout: 15_000 });
+  await window.locator('button.surfaceTab[aria-label="Codex Agent"]').click();
+  await window.waitForSelector(".paneActive .surfaceBodyFrameActive .terminalHost .xterm textarea", {
+    state: "attached",
+    timeout: 15_000
+  });
+
+  const creationSamples = [];
+  let tabCount = await window.locator(".paneActive button.surfaceTab").count();
+  while (tabCount < 8) {
+    const startedAt = Date.now();
+    await window.locator(".paneActive .surfaceAdd").click();
+    await window.waitForFunction((count) => document.querySelectorAll(".paneActive button.surfaceTab").length === count + 1, tabCount, {
+      timeout: 15_000
+    });
+    await window.waitForSelector(".paneActive .surfaceBodyFrameActive .terminalHost .xterm textarea", {
+      state: "attached",
+      timeout: 15_000
+    });
+    creationSamples.push(Date.now() - startedAt);
+    tabCount += 1;
+  }
+
+  const commandStartedAt = Date.now();
+  await runTerminalCommand(window, "Write-Output WMUX_EIGHT_SURFACE_LATENCY", "WMUX_EIGHT_SURFACE_LATENCY");
+  const commandMs = Date.now() - commandStartedAt;
+  if (commandMs > 5_000) {
+    throw new Error(`Eight terminal surface command latency exceeded threshold: ${JSON.stringify({ commandMs, creationSamples })}`);
+  }
+
+  log(`ok eight terminal surface latency ${JSON.stringify({ commandMs, creationSamples })}`);
+}
 
 async function runCliCommand(args) {
   const { stdout, stderr } = await execFileAsync(process.execPath, ["scripts/wmux-cli.mjs", ...args], {
@@ -746,6 +781,7 @@ try {
   await runTerminalCommand(window, "ls package.json", "package.json");
   await runTerminalCommand(window, "clear", "Codex Agent");
   await runTerminalCommand(window, "Write-Output WMUX_TERMINAL_SMOKE", "WMUX_TERMINAL_SMOKE");
+  await runEightTerminalSurfaceLatencySmoke(window);
   log("add terminal surface");
   const activePaneTabs = window.locator(".paneActive button.surfaceTab");
   const tabCountBeforeAdd = await activePaneTabs.count();
