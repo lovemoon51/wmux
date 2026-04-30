@@ -26,6 +26,7 @@ function printUsage() {
   wmux identify [--json]
   wmux capabilities [--json]
   wmux list-workspaces [--json]
+  wmux new-workspace [--name <name>] [--cwd <path>] [--json]
   wmux select-workspace --workspace <id> [--json]
   wmux close-workspace --workspace <id> [--json]
   wmux rename-workspace --workspace <id> --name <name> [--json]
@@ -250,6 +251,24 @@ function createRequest() {
 
   if (command === "list-workspaces") {
     return { method: "workspace.list", params: {} };
+  }
+
+  if (command === "new-workspace") {
+    const name = parseOption("--name");
+    const cwd = parseOption("--cwd");
+    if (name !== undefined && (!name || name.startsWith("--"))) {
+      throw cliError("new-workspace 的 --name 需要名称");
+    }
+    if (cwd !== undefined && (!cwd || cwd.startsWith("--"))) {
+      throw cliError("new-workspace 的 --cwd 需要路径");
+    }
+    return {
+      method: "workspace.create",
+      params: {
+        ...(name ? { name } : {}),
+        ...(cwd ? { cwd } : {})
+      }
+    };
   }
 
   if (command === "select-workspace") {
@@ -564,6 +583,12 @@ function printResult(result) {
       const activePrefix = workspace.active ? "*" : " ";
       console.log(`${activePrefix} ${workspace.name}\t${workspace.status}\t${workspace.cwd}`);
     }
+    return;
+  }
+
+  if (command === "new-workspace") {
+    const workspace = result?.workspace ?? result;
+    console.log(`created ${workspace?.name ?? workspace?.id ?? "workspace"}`);
     return;
   }
 

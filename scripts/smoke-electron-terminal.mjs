@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const logPath = "output/playwright/terminal-smoke.log";
 const smokeUserDataPath = resolve("output/playwright/wmux-smoke-user-data");
+const smokeWorkspaceStatePath = resolve(smokeUserDataPath, "workspace-state.json");
 const smokeSocketPath = process.platform === "win32" ? "\\\\.\\pipe\\wmux-smoke" : resolve("output/playwright/wmux-smoke.sock");
 const smokeSocketToken = "terminal-smoke-token";
 const smokePortServerPath = resolve("output/playwright/wmux-smoke-port-server.mjs");
@@ -477,6 +478,7 @@ async function runCliSocketSmoke(window) {
   for (const method of [
     "system.identify",
     "system.capabilities",
+    "workspace.create",
     "workspace.select",
     "workspace.close",
     "workspace.rename",
@@ -498,6 +500,19 @@ async function runCliSocketSmoke(window) {
     throw new Error(`wmux list-workspaces did not include API Server: ${workspaceOutput}`);
   }
   log("ok wmux list-workspaces");
+
+  const createWorkspaceOutput = await runCliCommand(["new-workspace", "--name", "CLI Create Smoke", "--cwd", "."]);
+  if (!createWorkspaceOutput.includes("created CLI Create Smoke")) {
+    throw new Error(`wmux new-workspace did not report created CLI Create Smoke: ${createWorkspaceOutput}`);
+  }
+  const createdWorkspaceIdentifyOutput = await runCliCommand(["identify", "--json"]);
+  const createdWorkspaceIdentify = JSON.parse(createdWorkspaceIdentifyOutput);
+  if (createdWorkspaceIdentify.workspaceName !== "CLI Create Smoke" || createdWorkspaceIdentify.cwd !== "D:/IdeaProject/codex/wmux") {
+    throw new Error(`wmux new-workspace did not activate expected workspace: ${createdWorkspaceIdentifyOutput}`);
+  }
+  await runCliCommand(["close-workspace", "--workspace", createdWorkspaceIdentify.workspaceId]);
+  await runCliCommand(["select-workspace", "--workspace", "workspace-api"]);
+  log("ok wmux new-workspace");
 
   const selectDocsOutput = await runCliCommand(["select-workspace", "--workspace", "workspace-docs"]);
   if (!selectDocsOutput.includes("selected Docs")) {
@@ -966,6 +981,46 @@ async function expectEnabled(locator) {
   });
 }
 
+async function dragSurfaceToPaneEdge(source, target, edge, expectedPaneCount) {
+  const targetBox = await target.boundingBox();
+  if (!targetBox) {
+    throw new Error("Target pane did not expose a bounding box for surface drag");
+  }
+  const targetPosition =
+    edge === "right"
+      ? { x: targetBox.width - 12, y: targetBox.height / 2 }
+      : edge === "left"
+        ? { x: 12, y: targetBox.height / 2 }
+        : edge === "bottom"
+          ? { x: targetBox.width / 2, y: targetBox.height - 12 }
+          : { x: targetBox.width / 2, y: 12 };
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await source.dragTo(target, { targetPosition });
+    try {
+      await target.page().waitForFunction((count) => document.querySelectorAll(".pane").length === count, expectedPaneCount, {
+        timeout: 5_000
+      });
+      return;
+    } catch (error) {
+      if (attempt === 2) {
+        throw error;
+      }
+    }
+  }
+}
+
+async function waitForWorkspaceStateText(text) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 15_000) {
+    if (existsSync(smokeWorkspaceStatePath) && readFileSync(smokeWorkspaceStatePath, "utf8").includes(text)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error(`workspace state did not include ${text}`);
+}
+
 async function runSessionRestoreSmoke(currentApp, window) {
   log("session restore");
   await window.getByLabel("New workspace").click();
@@ -987,7 +1042,7 @@ async function runSessionRestoreSmoke(currentApp, window) {
   );
   await window.getByLabel("Split horizontally").click();
   await window.waitForFunction(() => document.querySelectorAll(".pane").length >= 2, null, { timeout: 15_000 });
-  await window.waitForTimeout(700);
+  await waitForWorkspaceStateText("Restore Smoke");
 
   await Promise.race([currentApp.close(), new Promise((resolve) => setTimeout(resolve, 3_000))]);
   const restoredApp = await launchApp();
@@ -1051,21 +1106,7 @@ try {
   log("drag terminal surface to split");
   const paneCountBeforeTabDrag = await window.locator(".pane").count();
   const tabDragTargetPane = window.locator(".paneActive").first();
-  const tabDragTargetBox = await tabDragTargetPane.boundingBox();
-  if (!tabDragTargetBox) {
-    throw new Error("Active pane did not expose a bounding box for tab drag");
-  }
-  await newTerminalTab.dragTo(tabDragTargetPane, {
-    targetPosition: {
-      x: tabDragTargetBox.width - 12,
-      y: tabDragTargetBox.height / 2
-    }
-  });
-  await window.waitForFunction(
-    (count) => document.querySelectorAll(".pane").length === count + 1,
-    paneCountBeforeTabDrag,
-    { timeout: 15_000 }
-  );
+  await dragSurfaceToPaneEdge(newTerminalTab, tabDragTargetPane, "right", paneCountBeforeTabDrag + 1);
   await runTerminalCommand(window, "Write-Output WMUX_DRAG_SPLIT_SMOKE", "WMUX_DRAG_SPLIT_SMOKE");
   await window.locator(".paneActive").getByLabel("Close pane").click();
   await window.waitForFunction(
@@ -1089,21 +1130,7 @@ try {
     throw new Error(`Single-surface tab should be draggable, got ${singleSurfaceTabDraggable}`);
   }
   const targetPane = window.locator(".pane:not(.paneActive)").first();
-  const targetPaneBox = await targetPane.boundingBox();
-  if (!targetPaneBox) {
-    throw new Error("Target pane did not expose a bounding box for single-surface drag");
-  }
-  await singleSurfaceTab.dragTo(targetPane, {
-    targetPosition: {
-      x: 12,
-      y: targetPaneBox.height / 2
-    }
-  });
-  await window.waitForFunction(
-    (count) => document.querySelectorAll(".pane").length === count,
-    paneCountBeforeSinglePaneDrag,
-    { timeout: 15_000 }
-  );
+  await dragSurfaceToPaneEdge(singleSurfaceTab, targetPane, "left", paneCountBeforeSinglePaneDrag);
   await runTerminalCommand(window, "Write-Output WMUX_SINGLE_PANE_DRAG_SMOKE", "WMUX_SINGLE_PANE_DRAG_SMOKE");
   await window.locator(".paneActive").getByLabel("Close pane").click();
   await window.waitForFunction(

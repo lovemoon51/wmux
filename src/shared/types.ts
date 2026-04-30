@@ -80,6 +80,7 @@ export type SocketRpcMethod =
   | "system.identify"
   | "system.capabilities"
   | "workspace.list"
+  | "workspace.create"
   | "workspace.select"
   | "workspace.close"
   | "workspace.rename"
@@ -174,6 +175,11 @@ export type ClearStatusParams = {
 
 export type StatusListParams = {
   workspaceId?: string;
+};
+
+export type WorkspaceCreateParams = {
+  name?: string;
+  cwd?: string;
 };
 
 export type WorkspaceSelectParams = {

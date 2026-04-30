@@ -68,6 +68,7 @@ import type {
   WmuxSurfaceConfig,
   Workspace,
   WorkspaceCloseParams,
+  WorkspaceCreateParams,
   WorkspaceInspection,
   WorkspaceRenameParams,
   WorkspaceSelectParams,
@@ -335,16 +336,17 @@ function readDraggedSurfacePayload(event: DragEvent): DraggedSurfacePayload | nu
   }
 }
 
-function createWorkspace(): Workspace {
+function createWorkspace(options: { name?: string; cwd?: string } = {}): Workspace {
   const number = nextWorkspaceNumber++;
   const workspaceId = `workspace-new-${Date.now()}-${number}`;
   const paneId = `${workspaceId}-pane-terminal`;
   const surfaceId = `${workspaceId}-surface-terminal`;
+  const cwd = resolveWorkspaceCwd(options.cwd);
 
   return {
     id: workspaceId,
-    name: `Workspace ${number}`,
-    cwd: "D:/IdeaProject/codex/wmux",
+    name: options.name?.trim() || `Workspace ${number}`,
+    cwd,
     branch: "main",
     ports: [],
     status: "idle",
@@ -768,6 +770,7 @@ const socketCapabilities: SocketRpcMethod[] = [
   "system.identify",
   "system.capabilities",
   "workspace.list",
+  "workspace.create",
   "workspace.select",
   "workspace.close",
   "workspace.rename",
@@ -1911,6 +1914,31 @@ export function App(): ReactElement {
         window.wmux?.socket.respond(
           createSocketSuccessResponse(request.id, {
             workspaces: createWorkspaceSummaries(currentWorkspaces, currentActiveWorkspaceId)
+          })
+        );
+        return;
+      }
+
+      if (request.method === "workspace.create") {
+        const params = (request.params ?? {}) as Partial<WorkspaceCreateParams>;
+        if (params.name !== undefined && (typeof params.name !== "string" || !params.name.trim())) {
+          window.wmux?.socket.respond(createSocketErrorResponse(request.id, "BAD_REQUEST", "workspace.create name 不能为空"));
+          return;
+        }
+        if (params.cwd !== undefined && (typeof params.cwd !== "string" || !params.cwd.trim())) {
+          window.wmux?.socket.respond(createSocketErrorResponse(request.id, "BAD_REQUEST", "workspace.create cwd 不能为空"));
+          return;
+        }
+
+        const workspace = createWorkspace({
+          name: params.name,
+          cwd: params.cwd
+        });
+        setWorkspaces((items) => [...items, workspace]);
+        setActiveWorkspaceId(workspace.id);
+        window.wmux?.socket.respond(
+          createSocketSuccessResponse(request.id, {
+            workspace: createWorkspaceSummaries([workspace], workspace.id)[0]
           })
         );
         return;

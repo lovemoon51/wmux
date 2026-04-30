@@ -114,7 +114,7 @@ wmux browser errors list --surface surface:3
 | `system.identify` | `{}` | active ids |
 | `system.capabilities` | `{}` | method list |
 | `workspace.list` | `{}` | workspace list |
-| `workspace.create` | `{ name?, cwd?, layout? }` | workspace |
+| `workspace.create` | `{ name?, cwd? }` | workspace |
 | `workspace.select` | `{ workspaceId }` | selected workspace |
 | `workspace.close` | `{ workspaceId }` | closed workspace |
 | `workspace.rename` | `{ workspaceId, name }` | renamed workspace |
