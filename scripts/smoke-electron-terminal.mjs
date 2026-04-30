@@ -1,6 +1,6 @@
 import { _electron as electron } from "playwright";
 import electronPath from "electron";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -11,6 +11,7 @@ const logPath = "output/playwright/terminal-smoke.log";
 const smokeUserDataPath = resolve("output/playwright/wmux-smoke-user-data");
 const smokeSocketPath = process.platform === "win32" ? "\\\\.\\pipe\\wmux-smoke" : resolve("output/playwright/wmux-smoke.sock");
 const smokeSocketToken = "terminal-smoke-token";
+const smokePortServerPath = resolve("output/playwright/wmux-smoke-port-server.mjs");
 const projectConfigPath = resolve("wmux.json");
 const projectConfigBackupPath = resolve("output/playwright/wmux-json.backup");
 const hadProjectConfig = existsSync(projectConfigPath);
@@ -19,6 +20,17 @@ rmSync(smokeUserDataPath, { force: true, recursive: true });
 mkdirSync(smokeUserDataPath, { recursive: true });
 mkdirSync(resolve("output/playwright"), { recursive: true });
 writeFileSync(logPath, "");
+writeFileSync(
+  smokePortServerPath,
+  `import http from "node:http";
+const server = http.createServer((_request, response) => response.end("wmux smoke port"));
+server.listen(0, "127.0.0.1", () => {
+  console.log(server.address().port);
+});
+process.on("SIGTERM", () => server.close(() => process.exit(0)));
+`,
+  "utf8"
+);
 if (hadProjectConfig) {
   writeFileSync(projectConfigBackupPath, originalProjectConfig, "utf8");
 }
@@ -98,12 +110,66 @@ async function launchApp() {
   });
 }
 
+async function startSmokePortServer() {
+  const child = spawn(process.execPath, [smokePortServerPath], {
+    cwd: process.cwd(),
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true
+  });
+
+  const port = await new Promise((resolvePort, reject) => {
+    const timer = setTimeout(() => reject(new Error("timed out waiting for smoke port server")), 10_000);
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      const match = String(chunk).match(/\d+/);
+      if (match) {
+        clearTimeout(timer);
+        resolvePort(Number(match[0]));
+      }
+    });
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once("exit", (code) => {
+      clearTimeout(timer);
+      reject(new Error(`smoke port server exited early: ${code}`));
+    });
+  });
+
+  return { child, port };
+}
+
+async function stopSmokePortServer(server) {
+  if (!server) {
+    return;
+  }
+
+  server.child.kill();
+  await new Promise((resolveStop) => {
+    const timer = setTimeout(resolveStop, 2000);
+    server.child.once("exit", () => {
+      clearTimeout(timer);
+      resolveStop();
+    });
+  });
+}
+
 async function getReadyWindow(app) {
   const window = await app.firstWindow();
   await window.waitForLoadState("domcontentloaded");
   log(`loaded ${window.url()}`);
   await window.waitForSelector(".terminalHost .xterm textarea", { state: "attached", timeout: 15_000 });
   return window;
+}
+
+async function runWorkspaceInspectionSmoke(window, expectedPort) {
+  log("workspace inspection");
+  await window.waitForFunction((port) => document.body.textContent?.includes(`:${port}`), expectedPort, {
+    timeout: 15_000
+  });
+  await window.waitForFunction(() => document.body.textContent?.includes("main"), null, { timeout: 15_000 });
+  log("ok workspace inspection");
 }
 
 async function runTerminalCommand(window, command, expectedText) {
@@ -510,8 +576,10 @@ async function runSessionRestoreSmoke(currentApp, window) {
 }
 
 let app;
+let smokePortServer;
 
 try {
+  smokePortServer = await startSmokePortServer();
   app = await launchApp();
   let window = await getReadyWindow(app);
   const shellOptions = await window
@@ -519,6 +587,7 @@ try {
     .evaluateAll((options) => options.map((option) => ({ value: option.value, label: option.textContent })));
   log(`shell options ${JSON.stringify(shellOptions)}`);
 
+  await runWorkspaceInspectionSmoke(window, smokePortServer.port);
   await runCliSocketSmoke(window);
   await runWorkspaceCrud(window);
   await runSplitCrud(window);
@@ -644,6 +713,7 @@ try {
   if (app) {
     await Promise.race([app.close(), new Promise((resolve) => setTimeout(resolve, 3_000))]);
   }
+  await stopSmokePortServer(smokePortServer);
   if (hadProjectConfig) {
     writeFileSync(projectConfigPath, originalProjectConfig, "utf8");
   } else {

@@ -1,8 +1,10 @@
 import { app, BrowserWindow, ipcMain, nativeTheme, shell } from "electron";
 import { randomBytes } from "node:crypto";
+import { execFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { promisify } from "node:util";
 import { registerPtyIpc } from "./pty/ptyManager";
 import {
   createRpcError,
@@ -21,10 +23,12 @@ import type {
   WmuxProjectConfig,
   WmuxProjectConfigResult,
   WmuxSurfaceConfig,
-  WmuxWorkspaceCommandConfig
+  WmuxWorkspaceCommandConfig,
+  WorkspaceInspection
 } from "../shared/types";
 
 const isDev = !app.isPackaged;
+const execFileAsync = promisify(execFile);
 const userDataDir = process.env.WMUX_USER_DATA_DIR;
 const socketPath = getDefaultSocketPath();
 const socketSecurityMode = readSocketSecurityMode();
@@ -61,6 +65,10 @@ function readSocketSecurityMode(): SocketSecurityMode {
   }
 
   return "wmuxOnly";
+}
+
+function normalizePathForCompare(path: string): string {
+  return resolve(path).replace(/\\/g, "/").toLowerCase();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -234,6 +242,117 @@ function parseProjectConfig(value: unknown): { config: WmuxProjectConfig; errors
   return { config: { commands }, errors };
 }
 
+async function inspectWorkspaceCwd(cwd: string): Promise<WorkspaceInspection> {
+  const resolvedCwd = resolve(cwd);
+  const [branch, ports] = await Promise.all([detectGitBranch(resolvedCwd), detectListeningPorts(resolvedCwd)]);
+  return {
+    cwd: resolvedCwd.replace(/\\/g, "/"),
+    branch,
+    ports
+  };
+}
+
+async function detectGitBranch(cwd: string): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync("git", ["-C", cwd, "branch", "--show-current"], {
+      timeout: 2500,
+      windowsHide: true
+    });
+    const branch = stdout.trim();
+    if (branch) {
+      return branch;
+    }
+
+    const head = await execFileAsync("git", ["-C", cwd, "rev-parse", "--short", "HEAD"], {
+      timeout: 2500,
+      windowsHide: true
+    });
+    return head.stdout.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function detectListeningPorts(cwd: string): Promise<number[]> {
+  if (process.platform !== "win32") {
+    return [];
+  }
+
+  try {
+    const { stdout } = await execFileAsync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-Command",
+        "Get-NetTCPConnection -State Listen | Select-Object -Property LocalPort,OwningProcess | ConvertTo-Json -Compress"
+      ],
+      { timeout: 4000, windowsHide: true, maxBuffer: 1024 * 1024 }
+    );
+    const parsed = JSON.parse(stdout.trim() || "[]") as unknown;
+    const connections = (Array.isArray(parsed) ? parsed : parsed ? [parsed] : []).filter(isRecord);
+    const portByPid = new Map<number, Set<number>>();
+
+    for (const connection of connections) {
+      const pid = Number(connection.OwningProcess);
+      const port = Number(connection.LocalPort);
+      if (!Number.isInteger(pid) || pid <= 0 || !Number.isInteger(port) || port <= 0) {
+        continue;
+      }
+      const ports = portByPid.get(pid) ?? new Set<number>();
+      ports.add(port);
+      portByPid.set(pid, ports);
+    }
+
+    if (!portByPid.size) {
+      return [];
+    }
+
+    const candidatePids = await findProcessIdsForCwd(cwd, [...portByPid.keys()]);
+    return [...new Set(candidatePids.flatMap((pid) => [...(portByPid.get(pid) ?? [])]))].sort((first, second) => first - second);
+  } catch {
+    return [];
+  }
+}
+
+async function findProcessIdsForCwd(cwd: string, pids: number[]): Promise<number[]> {
+  const normalizedCwd = normalizePathForCompare(cwd);
+  const matchedPids = new Set<number>();
+  const batchSize = 60;
+
+  for (let index = 0; index < pids.length; index += batchSize) {
+    const batch = pids.slice(index, index + batchSize);
+    const filter = batch.map((pid) => `ProcessId=${pid}`).join(" OR ");
+    try {
+      const { stdout } = await execFileAsync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-Command",
+          `Get-CimInstance Win32_Process -Filter '${filter}' | Select-Object -Property ProcessId,CommandLine,ExecutablePath | ConvertTo-Json -Compress`
+        ],
+        { timeout: 4000, windowsHide: true, maxBuffer: 1024 * 1024 }
+      );
+      const parsed = JSON.parse(stdout.trim() || "[]") as unknown;
+      const processes = (Array.isArray(parsed) ? parsed : parsed ? [parsed] : []).filter(isRecord);
+      for (const processInfo of processes) {
+        const pid = Number(processInfo.ProcessId);
+        const haystack = [processInfo.CommandLine, processInfo.ExecutablePath]
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.replace(/\\/g, "/").toLowerCase())
+          .join(" ");
+
+        if (Number.isInteger(pid) && haystack.includes(normalizedCwd)) {
+          matchedPids.add(pid);
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return [...matchedPids];
+}
+
 async function loadProjectConfig(): Promise<WmuxProjectConfigResult> {
   const configPath = join(process.cwd(), "wmux.json");
 
@@ -395,6 +514,7 @@ app.whenReady().then(() => {
     await writeFile(getStatePath(), `${JSON.stringify(state, null, 2)}\n`, "utf8");
     return { ok: true };
   });
+  ipcMain.handle("workspace:inspectCwd", async (_event, cwd: string): Promise<WorkspaceInspection> => inspectWorkspaceCwd(cwd));
   ipcMain.handle(
     "browser:writeScreenshot",
     async (_event, payload: { path: string; base64: string; format: "png" | "jpeg" }): Promise<{ path: string; bytes: number }> => {

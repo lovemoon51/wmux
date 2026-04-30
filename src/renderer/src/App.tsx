@@ -60,6 +60,7 @@ import type {
   WmuxProjectConfigResult,
   WmuxSurfaceConfig,
   Workspace,
+  WorkspaceInspection,
   WorkspaceStatus,
   WorkspaceSummary
 } from "@shared/types";
@@ -1424,6 +1425,12 @@ function createWorkspaceSummaries(workspaces: Workspace[], activeWorkspaceId: st
   });
 }
 
+function shouldApplyWorkspaceInspection(workspace: Workspace, inspection: WorkspaceInspection): boolean {
+  const nextBranch = inspection.branch;
+  const nextPorts = inspection.ports;
+  return workspace.branch !== nextBranch || workspace.ports.join(",") !== nextPorts.join(",");
+}
+
 export function App(): ReactElement {
   const [workspaces, setWorkspaces] = useState(initialWorkspaces);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(workspaces[0].id);
@@ -1578,6 +1585,57 @@ export function App(): ReactElement {
   useEffect(() => {
     shellProfileRef.current = shellProfile;
   }, [shellProfile]);
+
+  useEffect(() => {
+    if (!hasHydratedPersistedState) {
+      return;
+    }
+
+    let isCancelled = false;
+    const uniqueCwds = [...new Set(workspaces.map((workspace) => workspace.cwd))];
+
+    void Promise.all(
+      uniqueCwds.map((cwd) =>
+        window.wmux?.workspace
+          .inspectCwd(cwd)
+          .then((inspection) => ({ cwd, inspection }))
+          .catch(() => null)
+      )
+    ).then((results) => {
+      if (isCancelled) {
+        return;
+      }
+
+      const inspectionByCwd = new Map<string, WorkspaceInspection>();
+      results.forEach((result) => {
+        if (result?.inspection) {
+          inspectionByCwd.set(result.cwd, result.inspection);
+        }
+      });
+      if (!inspectionByCwd.size) {
+        return;
+      }
+
+      setWorkspaces((currentWorkspaces) =>
+        currentWorkspaces.map((workspace) => {
+          const inspection = inspectionByCwd.get(workspace.cwd);
+          if (!inspection || !shouldApplyWorkspaceInspection(workspace, inspection)) {
+            return workspace;
+          }
+
+          return {
+            ...workspace,
+            branch: inspection.branch,
+            ports: inspection.ports
+          };
+        })
+      );
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [hasHydratedPersistedState, workspaces.map((workspace) => workspace.cwd).join("\n")]);
 
   useEffect(() => {
     if (selectedCommandIndex > normalizedSelectedCommandIndex) {

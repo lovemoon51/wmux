@@ -28,8 +28,8 @@
 - [x] 可读取项目级 `wmux.json`。
 - [x] command palette 可搜索并运行 custom command。
 - [x] workspace command 可创建包含多个 pane/surface 的布局。
-- [ ] sidebar 可显示 git branch。
-- [ ] sidebar 可显示监听端口。
+- [x] sidebar 可显示 git branch。
+- [x] sidebar 可显示监听端口。
 - [x] browser automation 支持 navigate、click、fill、eval。
 - [x] browser automation 支持 screenshot 和 snapshot。
 - [x] terminal 链接可在内置 browser 打开。

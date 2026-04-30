@@ -60,6 +60,12 @@ export type WmuxProjectConfigResult = {
   errors: string[];
 };
 
+export type WorkspaceInspection = {
+  cwd: string;
+  branch?: string;
+  ports: number[];
+};
+
 export type SocketRpcMethod =
   | "system.ping"
   | "system.identify"

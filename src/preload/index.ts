@@ -5,7 +5,8 @@ import type {
   ShellProfileOption,
   SocketRpcRequest,
   SocketRpcResponse,
-  WmuxProjectConfigResult
+  WmuxProjectConfigResult,
+  WorkspaceInspection
 } from "../shared/types";
 
 const api = {
@@ -17,7 +18,8 @@ const api = {
   },
   workspace: {
     loadState: (): Promise<PersistedAppState | null> => ipcRenderer.invoke("workspace:loadState"),
-    saveState: (state: PersistedAppState): Promise<{ ok: true }> => ipcRenderer.invoke("workspace:saveState", state)
+    saveState: (state: PersistedAppState): Promise<{ ok: true }> => ipcRenderer.invoke("workspace:saveState", state),
+    inspectCwd: (cwd: string): Promise<WorkspaceInspection> => ipcRenderer.invoke("workspace:inspectCwd", cwd)
   },
   terminal: {
     listShells: (): Promise<ShellProfileOption[]> => ipcRenderer.invoke("terminal:listShells"),
