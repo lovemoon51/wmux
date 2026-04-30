@@ -34,7 +34,7 @@
 - [x] browser automation 支持 screenshot 和 snapshot。
 - [x] terminal 链接可在内置 browser 打开。
 - [x] 设置页可配置 socket 安全模式。
-- [ ] 快捷键覆盖 workspace、pane、surface 的高频操作。
+- [x] 快捷键覆盖 workspace、pane、surface 的高频操作。
 
 ## 3. 体验验收
 

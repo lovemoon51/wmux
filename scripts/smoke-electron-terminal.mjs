@@ -182,6 +182,60 @@ async function runSettingsSmoke(window) {
   log("ok settings socket security");
 }
 
+async function runKeyboardShortcutSmoke(window) {
+  log("keyboard shortcuts");
+  await window.getByRole("button", { name: "Settings" }).click();
+  await window.getByRole("heading", { name: "API Server" }).click();
+
+  const workspaceCountBefore = await window.locator(".workspaceItem").count();
+  await window.keyboard.press("Control+Shift+N");
+  await window.waitForFunction((count) => document.querySelectorAll(".workspaceItem").length === count + 1, workspaceCountBefore, {
+    timeout: 15_000
+  });
+  await window.waitForFunction(() => document.querySelector(".titleIdentity h1")?.textContent?.startsWith("Workspace"), null, {
+    timeout: 15_000
+  });
+  log("ok shortcut new workspace");
+
+  await window.locator(".titleIdentity h1").click();
+  const tabCountBeforeTerminal = await window.locator(".paneActive button.surfaceTab").count();
+  await window.keyboard.press("Control+Shift+Enter");
+  await window.waitForFunction(
+    (count) => document.querySelectorAll(".paneActive button.surfaceTab").length === count + 1,
+    tabCountBeforeTerminal,
+    { timeout: 15_000 }
+  );
+  log("ok shortcut add terminal");
+
+  await window.locator(".titleIdentity h1").click();
+  const tabCountBeforeBrowser = await window.locator(".paneActive button.surfaceTab").count();
+  await window.keyboard.press("Control+Shift+B");
+  await window.waitForFunction(
+    (count) => document.querySelectorAll(".paneActive button.surfaceTab").length === count + 1,
+    tabCountBeforeBrowser,
+    { timeout: 15_000 }
+  );
+  await window.locator(".paneActive webview").waitFor({ timeout: 15_000 });
+  log("ok shortcut add browser");
+
+  await window.locator(".titleIdentity h1").click();
+  const paneCountBeforeSplit = await window.locator(".pane").count();
+  await window.keyboard.press("Control+Alt+ArrowDown");
+  await window.waitForFunction((count) => document.querySelectorAll(".pane").length === count + 1, paneCountBeforeSplit, {
+    timeout: 15_000
+  });
+  log("ok shortcut split vertical");
+
+  await window.getByLabel("Open workspace API Server").click();
+  await window.getByRole("heading", { name: "API Server" }).click();
+  await window.keyboard.press("Control+PageDown");
+  await window.getByRole("heading", { name: "Frontend" }).waitFor({ timeout: 15_000 });
+  await window.getByRole("heading", { name: "Frontend" }).click();
+  await window.keyboard.press("Control+PageUp");
+  await window.getByRole("heading", { name: "API Server" }).waitFor({ timeout: 15_000 });
+  log("ok shortcut workspace switch");
+}
+
 async function runTerminalCommand(window, command, expectedText) {
   log(`run ${command}`);
   await window.locator(".paneActive .surfaceBodyFrameActive .terminalHost").click();
@@ -292,10 +346,14 @@ async function renameWorkspace(window, currentName, nextName) {
   await window.getByRole("heading", { name: nextName }).waitFor({ timeout: 15_000 });
 }
 
+async function getActiveWorkspaceName(window) {
+  return window.locator(".titleIdentity h1").textContent();
+}
+
 async function runWorkspaceCrud(window) {
   log("workspace crud");
   await window.getByLabel("New workspace").click();
-  await renameWorkspace(window, "Workspace 1", "Smoke Workspace");
+  await renameWorkspace(window, await getActiveWorkspaceName(window), "Smoke Workspace");
   await runTerminalCommand(window, "Write-Output WMUX_WORKSPACE_SMOKE", "WMUX_WORKSPACE_SMOKE");
 
   await window.getByLabel("Open workspace API Server").click();
@@ -318,7 +376,7 @@ async function runWorkspaceCrud(window) {
 async function runSplitCrud(window) {
   log("split crud");
   await window.getByLabel("New workspace").click();
-  await renameWorkspace(window, "Workspace 2", "Split Smoke");
+  await renameWorkspace(window, await getActiveWorkspaceName(window), "Split Smoke");
 
   await window.getByLabel("Split horizontally").click();
   await window.waitForFunction(() => document.querySelectorAll(".pane").length >= 2, null, { timeout: 15_000 });
@@ -599,6 +657,7 @@ try {
 
   await runWorkspaceInspectionSmoke(window, smokePortServer.port);
   await runSettingsSmoke(window);
+  await runKeyboardShortcutSmoke(window);
   await runCliSocketSmoke(window);
   await runWorkspaceCrud(window);
   await runSplitCrud(window);

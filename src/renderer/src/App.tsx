@@ -1442,6 +1442,19 @@ function shouldApplyWorkspaceInspection(workspace: Workspace, inspection: Worksp
   return workspace.branch !== nextBranch || workspace.ports.join(",") !== nextPorts.join(",");
 }
 
+function shouldIgnoreGlobalShortcut(event: KeyboardEvent): boolean {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  if (target.closest("input, textarea, select, [contenteditable='true'], .terminalHost, webview")) {
+    return true;
+  }
+
+  return false;
+}
+
 export function App(): ReactElement {
   const [workspaces, setWorkspaces] = useState(initialWorkspaces);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(workspaces[0].id);
@@ -1662,23 +1675,6 @@ export function App(): ReactElement {
       setSelectedCommandIndex(normalizedSelectedCommandIndex);
     }
   }, [normalizedSelectedCommandIndex, selectedCommandIndex]);
-
-  useEffect(() => {
-    const handleGlobalKeyDown = (event: KeyboardEvent): void => {
-      const isCommandShortcut = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k";
-      if (!isCommandShortcut) {
-        return;
-      }
-
-      event.preventDefault();
-      setCommandPaletteOpen(true);
-      setCommandQuery("");
-      setSelectedCommandIndex(0);
-    };
-
-    window.addEventListener("keydown", handleGlobalKeyDown);
-    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
-  }, []);
 
   useEffect(() => {
     if (!pendingTerminalCommands.length) {
@@ -2220,6 +2216,33 @@ export function App(): ReactElement {
     });
   };
 
+  const handleCloseActiveSurface = (): void => {
+    const activePane = activeWorkspace.panes[activeWorkspace.activePaneId];
+    if (!activePane) {
+      return;
+    }
+
+    if (activePane.surfaceIds.length > 1) {
+      handleCloseSurface(activeWorkspace.activePaneId, activePane.activeSurfaceId);
+      return;
+    }
+
+    handleClosePane(activeWorkspace.activePaneId);
+  };
+
+  const handleSelectWorkspaceByOffset = (offset: number): void => {
+    if (workspaces.length <= 1) {
+      return;
+    }
+
+    const currentIndex = Math.max(
+      0,
+      workspaces.findIndex((workspace) => workspace.id === activeWorkspaceId)
+    );
+    const nextIndex = (currentIndex + offset + workspaces.length) % workspaces.length;
+    setActiveWorkspaceId(workspaces[nextIndex].id);
+  };
+
   const handleSplitActivePane = (direction: "horizontal" | "vertical"): void => {
     updateActiveWorkspace((workspace) => {
       const { paneId, pane, surface } = createPaneWithTerminal();
@@ -2349,6 +2372,80 @@ export function App(): ReactElement {
       };
     });
   };
+
+  useEffect(() => {
+    const handleGlobalKeyDown = (event: KeyboardEvent): void => {
+      const key = event.key.toLowerCase();
+      const isPrimary = event.ctrlKey || event.metaKey;
+      const isPlain = !event.ctrlKey && !event.metaKey && !event.altKey;
+
+      if (isPrimary && key === "k") {
+        event.preventDefault();
+        openCommandPalette();
+        return;
+      }
+
+      if (shouldIgnoreGlobalShortcut(event)) {
+        return;
+      }
+
+      if (isPrimary && event.shiftKey && key === "n") {
+        event.preventDefault();
+        handleCreateWorkspace();
+        return;
+      }
+
+      if (isPrimary && ((event.altKey && key === "arrowright") || (!event.altKey && key === "pagedown"))) {
+        event.preventDefault();
+        handleSelectWorkspaceByOffset(1);
+        return;
+      }
+
+      if (isPrimary && ((event.altKey && key === "arrowleft") || (!event.altKey && key === "pageup"))) {
+        event.preventDefault();
+        handleSelectWorkspaceByOffset(-1);
+        return;
+      }
+
+      if (isPrimary && event.shiftKey && key === "enter") {
+        event.preventDefault();
+        handleAddTerminalSurface(activeWorkspace.activePaneId);
+        return;
+      }
+
+      if (isPrimary && event.shiftKey && key === "b") {
+        event.preventDefault();
+        handleAddBrowserSurface(activeWorkspace.activePaneId);
+        return;
+      }
+
+      if (isPrimary && event.altKey && key === "arrowdown") {
+        event.preventDefault();
+        handleSplitActivePane("vertical");
+        return;
+      }
+
+      if (isPrimary && event.altKey && key === "arrowup") {
+        event.preventDefault();
+        handleSplitActivePane("horizontal");
+        return;
+      }
+
+      if (isPlain && key === "f2") {
+        event.preventDefault();
+        handleStartRenameWorkspace(activeWorkspace);
+        return;
+      }
+
+      if (isPrimary && key === "w") {
+        event.preventDefault();
+        handleCloseActiveSurface();
+      }
+    };
+
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, [activeWorkspace, activeWorkspaceId, workspaces, workspaceNameDraft, editingWorkspaceId]);
 
   return (
     <main className="appShell">
