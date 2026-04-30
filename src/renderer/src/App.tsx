@@ -1842,6 +1842,26 @@ export function App(): ReactElement {
   };
 
   const runWorkspaceCommand = (command: WmuxCommandConfig): void => {
+    if (command.restart === "ignore") {
+      const workspaceName = command.workspace?.name?.trim() || command.name;
+      const workspaceCwd = resolveWorkspaceCwd(command.workspace?.cwd);
+      const existingWorkspace = workspaces.find((workspace) => workspace.name === workspaceName && workspace.cwd === workspaceCwd);
+      if (existingWorkspace) {
+        setActiveWorkspaceId(existingWorkspace.id);
+        setWorkspaces((currentWorkspaces) =>
+          currentWorkspaces.map((workspace) =>
+            workspace.id === existingWorkspace.id
+              ? {
+                  ...workspace,
+                  notice: `已存在，跳过重复运行：${command.name}`
+                }
+              : workspace
+          )
+        );
+        return;
+      }
+    }
+
     const buildResult = createWorkspaceFromCommand(command);
     setWorkspaces((currentWorkspaces) => [...currentWorkspaces, buildResult.workspace]);
     setActiveWorkspaceId(buildResult.workspace.id);

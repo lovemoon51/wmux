@@ -50,6 +50,7 @@ writeFileSync(
           name: "Open Dev Layout",
           description: "创建包含终端和浏览器的工作区",
           keywords: ["layout", "dev"],
+          restart: "ignore",
           workspace: {
             name: "Command Layout Smoke",
             cwd: ".",
@@ -1139,6 +1140,22 @@ async function runCommandPaletteSmoke(window) {
     timeout: 15_000
   });
   log("ok workspace command layout");
+
+  const workspaceCountBeforeRestartIgnore = await window.locator(".workspaceItem").count();
+  await window.locator(".titleBar").getByRole("button", { name: "Command", exact: true }).click();
+  await commandSearch.fill("dev layout");
+  await commandSearch.press("Enter");
+  await window.getByLabel("Command palette").waitFor({ state: "detached", timeout: 15_000 });
+  await window.getByRole("heading", { name: "Command Layout Smoke" }).waitFor({ timeout: 15_000 });
+  await window.waitForFunction(
+    (count) => document.querySelectorAll(".workspaceItem").length === count,
+    workspaceCountBeforeRestartIgnore,
+    { timeout: 15_000 }
+  );
+  await window.waitForFunction(() => document.body.textContent?.includes("已存在，跳过重复运行：Open Dev Layout"), null, {
+    timeout: 15_000
+  });
+  log("ok workspace command restart ignore");
 
   await window.getByLabel("Open workspace API Server").click();
   await window.getByRole("heading", { name: "API Server" }).waitFor({ timeout: 15_000 });
