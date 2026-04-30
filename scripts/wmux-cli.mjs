@@ -27,6 +27,7 @@ function printUsage() {
   wmux capabilities [--json]
   wmux list-workspaces [--json]
   wmux select-workspace --workspace <id> [--json]
+  wmux close-workspace --workspace <id> [--json]
   wmux surface list [--workspace <id>] [--json]
   wmux surface focus --surface <id> [--json]
   wmux send <text> [--json]
@@ -257,6 +258,19 @@ function createRequest() {
     }
     return {
       method: "workspace.select",
+      params: {
+        workspaceId
+      }
+    };
+  }
+
+  if (command === "close-workspace") {
+    const workspaceId = parseOption("--workspace");
+    if (!workspaceId || workspaceId.startsWith("--")) {
+      throw cliError("close-workspace 需要 --workspace <id>");
+    }
+    return {
+      method: "workspace.close",
       params: {
         workspaceId
       }
@@ -536,6 +550,11 @@ function printResult(result) {
 
   if (command === "select-workspace") {
     console.log(`selected ${result?.workspaceName ?? result?.workspaceId ?? "workspace"}`);
+    return;
+  }
+
+  if (command === "close-workspace") {
+    console.log(`closed ${result?.workspaceName ?? result?.workspaceId ?? "workspace"}`);
     return;
   }
 

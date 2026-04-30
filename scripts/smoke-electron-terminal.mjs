@@ -467,6 +467,7 @@ async function runCliSocketSmoke(window) {
     "system.identify",
     "system.capabilities",
     "workspace.select",
+    "workspace.close",
     "surface.list",
     "surface.focus",
     "surface.sendKey",
@@ -505,6 +506,26 @@ async function runCliSocketSmoke(window) {
     throw new Error(`wmux select-workspace did not restore API Server: ${selectedApiOutput}`);
   }
   log("ok wmux select-workspace");
+
+  await window.getByLabel("New workspace").click();
+  await renameWorkspace(window, await getActiveWorkspaceName(window), "CLI Close Smoke");
+  const cliCloseWorkspaceOutput = await runCliCommand(["list-workspaces", "--json"]);
+  const cliCloseWorkspaceList = JSON.parse(cliCloseWorkspaceOutput);
+  const cliCloseWorkspace = cliCloseWorkspaceList.workspaces?.find((workspace) => workspace.name === "CLI Close Smoke");
+  if (!cliCloseWorkspace?.id) {
+    throw new Error(`wmux list-workspaces did not include CLI Close Smoke: ${cliCloseWorkspaceOutput}`);
+  }
+  const closeWorkspaceOutput = await runCliCommand(["close-workspace", "--workspace", cliCloseWorkspace.id]);
+  if (!closeWorkspaceOutput.includes("closed CLI Close Smoke")) {
+    throw new Error(`wmux close-workspace did not report closed CLI Close Smoke: ${closeWorkspaceOutput}`);
+  }
+  const afterCloseWorkspaceOutput = await runCliCommand(["list-workspaces", "--json"]);
+  const afterCloseWorkspaceList = JSON.parse(afterCloseWorkspaceOutput);
+  if (afterCloseWorkspaceList.workspaces?.some((workspace) => workspace.id === cliCloseWorkspace.id)) {
+    throw new Error(`wmux close-workspace did not remove workspace: ${afterCloseWorkspaceOutput}`);
+  }
+  await runCliCommand(["select-workspace", "--workspace", "workspace-api"]);
+  log("ok wmux close-workspace");
 
   const surfaceOutput = await runCliCommand(["surface", "list"]);
   if (!surfaceOutput.includes("surface-agent") || !surfaceOutput.includes("terminal") || !surfaceOutput.includes("API Server")) {

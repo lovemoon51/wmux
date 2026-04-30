@@ -67,6 +67,7 @@ import type {
   WmuxProjectConfigResult,
   WmuxSurfaceConfig,
   Workspace,
+  WorkspaceCloseParams,
   WorkspaceInspection,
   WorkspaceSelectParams,
   WorkspaceStatus,
@@ -767,6 +768,7 @@ const socketCapabilities: SocketRpcMethod[] = [
   "system.capabilities",
   "workspace.list",
   "workspace.select",
+  "workspace.close",
   "surface.list",
   "surface.focus",
   "surface.sendText",
@@ -1641,6 +1643,7 @@ export function App(): ReactElement {
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
   const workspacesRef = useRef(workspaces);
   const activeWorkspaceIdRef = useRef(activeWorkspaceId);
+  const editingWorkspaceIdRef = useRef(editingWorkspaceId);
   const shellProfileRef = useRef(shellProfile);
 
   useEffect(() => {
@@ -1650,6 +1653,10 @@ export function App(): ReactElement {
   useEffect(() => {
     activeWorkspaceIdRef.current = activeWorkspaceId;
   }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    editingWorkspaceIdRef.current = editingWorkspaceId;
+  }, [editingWorkspaceId]);
 
   useEffect(() => {
     shellProfileRef.current = shellProfile;
@@ -1932,6 +1939,55 @@ export function App(): ReactElement {
             workspaceId: targetWorkspace.id,
             workspaceName: targetWorkspace.name,
             activePaneId: targetWorkspace.activePaneId
+          })
+        );
+        return;
+      }
+
+      if (request.method === "workspace.close") {
+        const params = (request.params ?? {}) as Partial<WorkspaceCloseParams>;
+        if (typeof params.workspaceId !== "string" || !params.workspaceId.trim()) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "BAD_REQUEST", "workspace.close 需要 workspaceId")
+          );
+          return;
+        }
+
+        const closedIndex = currentWorkspaces.findIndex((workspace) => workspace.id === params.workspaceId);
+        if (closedIndex < 0) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "NOT_FOUND", "找不到 workspace", {
+              workspaceId: params.workspaceId
+            })
+          );
+          return;
+        }
+        if (currentWorkspaces.length <= 1) {
+          window.wmux?.socket.respond(createSocketErrorResponse(request.id, "INVALID_STATE", "不能关闭最后一个 workspace"));
+          return;
+        }
+
+        const closedWorkspace = currentWorkspaces[closedIndex];
+        const nextWorkspaces = currentWorkspaces.filter((workspace) => workspace.id !== params.workspaceId);
+        const fallbackWorkspace =
+          params.workspaceId === currentActiveWorkspaceId
+            ? nextWorkspaces[Math.max(0, Math.min(closedIndex, nextWorkspaces.length - 1))]
+            : currentWorkspaces.find((workspace) => workspace.id === currentActiveWorkspaceId);
+
+        setWorkspaces(nextWorkspaces);
+        if (fallbackWorkspace) {
+          setActiveWorkspaceId(fallbackWorkspace.id);
+        }
+        if (editingWorkspaceIdRef.current === params.workspaceId) {
+          setEditingWorkspaceId(null);
+          setWorkspaceNameDraft("");
+        }
+
+        window.wmux?.socket.respond(
+          createSocketSuccessResponse(request.id, {
+            workspaceId: closedWorkspace.id,
+            workspaceName: closedWorkspace.name,
+            activeWorkspaceId: fallbackWorkspace?.id
           })
         );
         return;
