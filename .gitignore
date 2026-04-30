@@ -4,6 +4,7 @@ dist
 release
 output
 .claude
+.idea
 .DS_Store
 *.log
 .env

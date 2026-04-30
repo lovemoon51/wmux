@@ -4,11 +4,15 @@ import type {
   ShellProfile,
   ShellProfileOption,
   SocketRpcRequest,
-  SocketRpcResponse
+  SocketRpcResponse,
+  WmuxProjectConfigResult
 } from "../shared/types";
 
 const api = {
   getVersion: (): Promise<string> => ipcRenderer.invoke("app:version"),
+  config: {
+    loadProjectConfig: (): Promise<WmuxProjectConfigResult> => ipcRenderer.invoke("config:loadProjectConfig")
+  },
   workspace: {
     loadState: (): Promise<PersistedAppState | null> => ipcRenderer.invoke("workspace:loadState"),
     saveState: (state: PersistedAppState): Promise<{ ok: true }> => ipcRenderer.invoke("workspace:saveState", state)
@@ -41,6 +45,10 @@ const api = {
       ipcRenderer.on("terminal:exit", listener);
       return () => ipcRenderer.removeListener("terminal:exit", listener);
     }
+  },
+  browser: {
+    writeScreenshot: (payload: { path: string; base64: string; format: "png" | "jpeg" }): Promise<{ path: string; bytes: number }> =>
+      ipcRenderer.invoke("browser:writeScreenshot", payload)
   },
   socket: {
     getPath: (): string | undefined => process.env.WMUX_SOCKET_PATH,

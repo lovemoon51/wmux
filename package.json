@@ -14,7 +14,8 @@
     "preview": "electron-vite preview",
     "type-check": "tsc --noEmit",
     "lint": "eslint .",
-    "smoke:terminal": "node scripts/smoke-electron-terminal.mjs"
+    "smoke:terminal": "node scripts/smoke-electron-terminal.mjs",
+    "smoke:browser": "node scripts/smoke-browser-automation.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.4",

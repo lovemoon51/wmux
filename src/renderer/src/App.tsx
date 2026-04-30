@@ -19,25 +19,43 @@ import {
 } from "lucide-react";
 import {
   createElement,
+  useCallback,
   useEffect,
   useRef,
   useState,
   type DragEvent,
   type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent,
   type ReactElement
 } from "react";
 import type {
+  BrowserClickParams,
+  BrowserEvalParams,
+  BrowserFillParams,
+  BrowserNavigateParams,
+  BrowserRpcMethod,
+  BrowserScreenshotParams,
+  BrowserSelectorWait,
+  BrowserSnapshotNode,
+  BrowserSnapshotParams,
+  BrowserSurfaceSelector,
+  BrowserWaitUntil,
   LayoutNode,
   NotifyParams,
   PersistedAppState,
   SendTextParams,
   ShellProfile,
   ShellProfileOption,
+  SocketRpcErrorDetails,
   SocketRpcErrorCode,
   SocketRpcRequest,
   SocketRpcResponse,
   Surface,
+  WmuxCommandConfig,
+  WmuxLayoutConfig,
+  WmuxProjectConfigResult,
+  WmuxSurfaceConfig,
   Workspace,
   WorkspaceStatus,
   WorkspaceSummary
@@ -55,6 +73,27 @@ type BrowserSessionState = {
   url: string;
 };
 
+type BrowserWebviewElement = HTMLElement & {
+  canGoBack?: () => boolean;
+  canGoForward?: () => boolean;
+  capturePage?: () => Promise<{ toDataURL: () => string }>;
+  executeJavaScript?: (script: string, userGesture?: boolean) => Promise<unknown>;
+  getURL?: () => string;
+  goBack?: () => void;
+  goForward?: () => void;
+  loadURL?: (url: string) => void;
+  reload?: () => void;
+  setZoomFactor?: (factor: number) => void;
+};
+
+type BrowserRuntime = {
+  surfaceId: string;
+  runtimeId: string;
+  viewId?: number;
+  webview: BrowserWebviewElement;
+  navigate: (url: string, waitUntil: BrowserWaitUntil, timeoutMs: number) => Promise<string>;
+};
+
 type SplitDropEdge = "top" | "right" | "bottom" | "left";
 
 type DraggedSurfacePayload = {
@@ -62,7 +101,18 @@ type DraggedSurfacePayload = {
   surfaceId: string;
 };
 
+type PendingTerminalCommand = {
+  surfaceId: string;
+  command: string;
+};
+
+type WorkspaceCommandBuildResult = {
+  workspace: Workspace;
+  terminalCommands: PendingTerminalCommand[];
+};
+
 const browserSessions = new Map<string, BrowserSessionState>();
+const browserRuntimes = new Map<string, BrowserRuntime>();
 
 function getBrowserSessionSnapshot(): PersistedAppState["browserSessions"] {
   return Object.fromEntries(browserSessions.entries());
@@ -460,6 +510,160 @@ function countSplitNodes(node: LayoutNode): number {
   return 1 + countSplitNodes(node.children[0]) + countSplitNodes(node.children[1]);
 }
 
+function appendCommandNewline(command: string): string {
+  return command.endsWith("\n") || command.endsWith("\r") ? command : `${command}\n`;
+}
+
+function resolveWorkspaceCwd(cwd?: string): string {
+  if (!cwd || cwd === ".") {
+    return "D:/IdeaProject/codex/wmux";
+  }
+
+  return cwd;
+}
+
+function createConfiguredSurface(config: WmuxSurfaceConfig, fallbackName: string): Surface {
+  const number = nextSurfaceNumber++;
+  const isTerminal = config.type === "terminal";
+  const fallbackSubtitle = isTerminal ? "PowerShell" : (config.url ?? "about:blank");
+
+  return {
+    id: `surface-${config.type}-${Date.now()}-${number}`,
+    type: config.type,
+    name: config.name?.trim() || fallbackName,
+    subtitle: fallbackSubtitle,
+    status: config.type === "terminal" && config.command ? "running" : "idle"
+  };
+}
+
+function clampSplitRatio(value: number | undefined): number {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return 0.5;
+  }
+
+  return Math.min(0.82, Math.max(0.18, value));
+}
+
+function createWorkspaceFromCommand(command: WmuxCommandConfig): WorkspaceCommandBuildResult {
+  const workspaceNumber = nextWorkspaceNumber++;
+  const workspaceId = `workspace-command-${Date.now()}-${workspaceNumber}`;
+  const panes: Workspace["panes"] = {};
+  const surfaces: Workspace["surfaces"] = {};
+  const terminalCommands: PendingTerminalCommand[] = [];
+  let activePaneId = "";
+  let focusedSurfaceId = "";
+
+  const createPaneFromConfig = (surfaceConfigs: WmuxSurfaceConfig[]): string => {
+    const paneNumber = nextPaneNumber++;
+    const paneId = `${workspaceId}-pane-${paneNumber}`;
+    const nextSurfaceIds = surfaceConfigs.map((surfaceConfig, surfaceIndex) => {
+      const surface = createConfiguredSurface(
+        surfaceConfig,
+        `${surfaceConfig.type === "browser" ? "Browser" : "Terminal"} ${surfaceIndex + 1}`
+      );
+      surfaces[surface.id] = surface;
+
+      if (surfaceConfig.type === "browser") {
+        browserSessions.set(surface.id, {
+          history: [surfaceConfig.url ?? "about:blank"],
+          historyIndex: 0,
+          url: surfaceConfig.url ?? "about:blank"
+        });
+      }
+
+      if (surfaceConfig.type === "terminal" && surfaceConfig.command) {
+        terminalCommands.push({ surfaceId: surface.id, command: surfaceConfig.command });
+      }
+
+      if (surfaceConfig.focus) {
+        activePaneId = paneId;
+        focusedSurfaceId = surface.id;
+      }
+
+      return surface.id;
+    });
+
+    panes[paneId] = {
+      id: paneId,
+      surfaceIds: nextSurfaceIds,
+      activeSurfaceId: focusedSurfaceId && nextSurfaceIds.includes(focusedSurfaceId) ? focusedSurfaceId : nextSurfaceIds[0]
+    };
+
+    if (!activePaneId) {
+      activePaneId = paneId;
+    }
+
+    return paneId;
+  };
+
+  const createLayoutNode = (layoutConfig: WmuxLayoutConfig): LayoutNode => {
+    if ("pane" in layoutConfig) {
+      return { type: "pane", id: createPaneFromConfig(layoutConfig.pane.surfaces) };
+    }
+
+    return {
+      type: "split",
+      id: `split-command-${Date.now()}-${nextSplitNumber++}`,
+      direction: layoutConfig.direction,
+      ratio: clampSplitRatio(layoutConfig.split),
+      children: [createLayoutNode(layoutConfig.children[0]), createLayoutNode(layoutConfig.children[1])]
+    };
+  };
+
+  const defaultLayout: WmuxLayoutConfig = command.workspace?.layout ?? {
+    pane: {
+      surfaces: [
+        {
+          type: "terminal",
+          name: "Terminal",
+          command: command.command,
+          focus: true
+        }
+      ]
+    }
+  };
+  const layout = createLayoutNode(defaultLayout);
+  const firstPane = activePaneId || firstPaneId(layout);
+
+  return {
+    workspace: {
+      id: workspaceId,
+      name: command.workspace?.name?.trim() || command.name,
+      cwd: resolveWorkspaceCwd(command.workspace?.cwd),
+      branch: "main",
+      ports: [],
+      status: terminalCommands.length > 0 ? "running" : "idle",
+      notice: `已从 wmux.json 创建：${command.name}`,
+      activePaneId: firstPane,
+      layout,
+      panes,
+      surfaces
+    },
+    terminalCommands
+  };
+}
+
+function commandMatchesQuery(command: WmuxCommandConfig, query: string): boolean {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  const haystack = [command.name, command.description, command.command, ...(command.keywords ?? [])]
+    .filter((value): value is string => Boolean(value))
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(normalizedQuery);
+}
+
+function getCommandTypeLabel(command: WmuxCommandConfig): string {
+  if (command.workspace) {
+    return "Workspace";
+  }
+
+  return "Terminal";
+}
+
 function createSocketSuccessResponse(id: string, result: unknown): SocketRpcResponse {
   return { id, ok: true, result };
 }
@@ -467,9 +671,10 @@ function createSocketSuccessResponse(id: string, result: unknown): SocketRpcResp
 function createSocketErrorResponse(
   id: string,
   code: SocketRpcErrorCode,
-  message: string
+  message: string,
+  details?: SocketRpcErrorDetails
 ): SocketRpcResponse {
-  return { id, ok: false, error: { code, message } };
+  return { id, ok: false, error: { code, message, details } };
 }
 
 function getActiveTerminalSurface(workspace: Workspace, preferredSurfaceId?: string): Surface | null {
@@ -486,6 +691,504 @@ function getActiveTerminalSurface(workspace: Workspace, preferredSurfaceId?: str
 
   const fallbackSurfaceId = activePane?.surfaceIds.find((surfaceId) => workspace.surfaces[surfaceId]?.type === "terminal");
   return fallbackSurfaceId ? workspace.surfaces[fallbackSurfaceId] : null;
+}
+
+function isBrowserRpcMethod(method: string): method is BrowserRpcMethod {
+  return (
+    method === "browser.navigate" ||
+    method === "browser.click" ||
+    method === "browser.fill" ||
+    method === "browser.eval" ||
+    method === "browser.snapshot" ||
+    method === "browser.screenshot"
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function createBrowserError(
+  code: SocketRpcErrorCode,
+  message: string,
+  details?: SocketRpcErrorDetails
+): Error & { code: SocketRpcErrorCode; details?: SocketRpcErrorDetails } {
+  const error = new Error(message) as Error & { code: SocketRpcErrorCode; details?: SocketRpcErrorDetails };
+  error.code = code;
+  error.details = details;
+  return error;
+}
+
+function getBrowserTimeout(params: unknown, fallback: number): number {
+  if (isRecord(params) && typeof params.timeoutMs === "number" && Number.isFinite(params.timeoutMs) && params.timeoutMs > 0) {
+    return Math.min(Math.floor(params.timeoutMs), 60_000);
+  }
+
+  return fallback;
+}
+
+function readBrowserWaitUntil(params: unknown): BrowserWaitUntil {
+  if (isRecord(params) && (params.waitUntil === "none" || params.waitUntil === "domcontentloaded" || params.waitUntil === "load")) {
+    return params.waitUntil;
+  }
+
+  return "domcontentloaded";
+}
+
+function readSelectorWait(params: unknown): BrowserSelectorWait {
+  if (isRecord(params) && (params.wait === "visible" || params.wait === "attached" || params.wait === "none")) {
+    return params.wait;
+  }
+
+  return "visible";
+}
+
+function getBrowserSurfaces(workspace: Workspace): Array<{ surface: Surface; paneId: string; workspaceId: string }> {
+  return Object.values(workspace.panes).flatMap((pane) =>
+    pane.surfaceIds
+      .map((surfaceId) => workspace.surfaces[surfaceId])
+      .filter((surface): surface is Surface => surface?.type === "browser")
+      .map((surface) => ({ surface, paneId: pane.id, workspaceId: workspace.id }))
+  );
+}
+
+function resolveBrowserSurface(
+  workspaces: Workspace[],
+  activeWorkspaceId: string,
+  selector: BrowserSurfaceSelector
+): { surface: Surface; paneId: string; workspace: Workspace } | null {
+  const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
+  if (!activeWorkspace) {
+    throw createBrowserError("INVALID_STATE", "没有可用 workspace");
+  }
+
+  if (selector.surfaceId) {
+    for (const workspace of workspaces) {
+      const surface = workspace.surfaces[selector.surfaceId];
+      if (!surface) {
+        continue;
+      }
+      if (surface.type !== "browser") {
+        throw createBrowserError("SURFACE_TYPE_MISMATCH", "指定 surface 不是 browser", { surfaceId: selector.surfaceId });
+      }
+      const pane = Object.values(workspace.panes).find((currentPane) => currentPane.surfaceIds.includes(surface.id));
+      if (!pane) {
+        throw createBrowserError("NOT_FOUND", "找不到 browser surface 所在 pane", { surfaceId: selector.surfaceId });
+      }
+      return { surface, paneId: pane.id, workspace };
+    }
+    throw createBrowserError("NOT_FOUND", "找不到 browser surface", { surfaceId: selector.surfaceId });
+  }
+
+  if (selector.paneId) {
+    const workspace = workspaces.find((item) => Boolean(item.panes[selector.paneId ?? ""]));
+    const pane = workspace?.panes[selector.paneId];
+    if (!workspace || !pane) {
+      throw createBrowserError("NOT_FOUND", "找不到 pane", { paneId: selector.paneId });
+    }
+    const activeSurface = workspace.surfaces[pane.activeSurfaceId];
+    if (activeSurface?.type === "browser") {
+      return { surface: activeSurface, paneId: pane.id, workspace };
+    }
+    const browserSurfaces = pane.surfaceIds
+      .map((surfaceId) => workspace.surfaces[surfaceId])
+      .filter((surface): surface is Surface => surface?.type === "browser");
+    if (browserSurfaces.length === 1) {
+      return { surface: browserSurfaces[0], paneId: pane.id, workspace };
+    }
+    if (browserSurfaces.length > 1) {
+      throw createBrowserError("AMBIGUOUS_TARGET", "pane 中存在多个 browser surface，请指定 --surface", { paneId: pane.id });
+    }
+    return null;
+  }
+
+  const targetWorkspace = selector.workspaceId
+    ? workspaces.find((workspace) => workspace.id === selector.workspaceId)
+    : activeWorkspace;
+  if (!targetWorkspace) {
+    throw createBrowserError("NOT_FOUND", "找不到 workspace", { workspaceId: selector.workspaceId });
+  }
+
+  const browserSurfaces = getBrowserSurfaces(targetWorkspace);
+  if (!selector.workspaceId && selector.active !== true && browserSurfaces.length > 1) {
+    throw createBrowserError("AMBIGUOUS_TARGET", "当前 workspace 中存在多个 browser surface，请指定 --surface", {
+      workspaceId: targetWorkspace.id
+    });
+  }
+
+  const activePane = targetWorkspace.panes[targetWorkspace.activePaneId];
+  const activeSurface = activePane ? targetWorkspace.surfaces[activePane.activeSurfaceId] : undefined;
+  if (activePane && activeSurface?.type === "browser") {
+    return { surface: activeSurface, paneId: activePane.id, workspace: targetWorkspace };
+  }
+
+  if (browserSurfaces.length === 1) {
+    return {
+      surface: browserSurfaces[0].surface,
+      paneId: browserSurfaces[0].paneId,
+      workspace: targetWorkspace
+    };
+  }
+  if (browserSurfaces.length > 1) {
+    throw createBrowserError("AMBIGUOUS_TARGET", "当前 workspace 中存在多个 browser surface，请指定 --surface", {
+      workspaceId: targetWorkspace.id
+    });
+  }
+
+  return null;
+}
+
+function createBrowserSurfaceInWorkspace(
+  workspaces: Workspace[],
+  activeWorkspaceId: string,
+  selector: BrowserSurfaceSelector,
+  url: string
+): { workspaces: Workspace[]; surface: Surface; paneId: string; workspaceId: string } {
+  const targetWorkspaceId = selector.workspaceId ?? activeWorkspaceId;
+  const targetWorkspace = workspaces.find((workspace) => workspace.id === targetWorkspaceId) ?? workspaces[0];
+  if (!targetWorkspace) {
+    throw createBrowserError("INVALID_STATE", "没有可用 workspace");
+  }
+
+  const paneId = selector.paneId ?? targetWorkspace.activePaneId;
+  const pane = targetWorkspace.panes[paneId];
+  if (!pane) {
+    throw createBrowserError("NOT_FOUND", "找不到用于创建 browser 的 pane", { paneId });
+  }
+
+  const surface = { ...createBrowserSurface(), subtitle: normalizeBrowserUrl(url) };
+  browserSessions.set(surface.id, {
+    history: [surface.subtitle ?? "about:blank"],
+    historyIndex: 0,
+    url: surface.subtitle ?? "about:blank"
+  });
+
+  return {
+    surface,
+    paneId,
+    workspaceId: targetWorkspace.id,
+    workspaces: workspaces.map((workspace) =>
+      workspace.id === targetWorkspace.id
+        ? {
+            ...workspace,
+            activePaneId: paneId,
+            panes: {
+              ...workspace.panes,
+              [paneId]: {
+                ...pane,
+                surfaceIds: [...pane.surfaceIds, surface.id],
+                activeSurfaceId: surface.id
+              }
+            },
+            surfaces: {
+              ...workspace.surfaces,
+              [surface.id]: surface
+            }
+          }
+        : workspace
+    )
+  };
+}
+
+async function waitForBrowserRuntime(surfaceId: string, timeoutMs: number): Promise<BrowserRuntime> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const runtime = browserRuntimes.get(surfaceId);
+    if (runtime) {
+      return runtime;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+  }
+
+  throw createBrowserError("TIMEOUT", "browser webview 未在超时内就绪", { surfaceId, timeoutMs });
+}
+
+function ensureNoCreateForNonNavigate(method: BrowserRpcMethod, params: unknown): void {
+  if (method !== "browser.navigate" && isRecord(params) && params.createIfMissing === true) {
+    throw createBrowserError("BAD_REQUEST", "createIfMissing is only supported by browser.navigate", { method });
+  }
+}
+
+async function executeBrowserJavaScript<T>(runtime: BrowserRuntime, script: string, timeoutMs: number): Promise<T> {
+  if (!runtime.webview.executeJavaScript) {
+    throw createBrowserError("BROWSER_ERROR", "当前 webview 不支持 executeJavaScript", { surfaceId: runtime.surfaceId });
+  }
+
+  return Promise.race([
+    runtime.webview.executeJavaScript(script, true) as Promise<T>,
+    new Promise<T>((_resolve, reject) =>
+      window.setTimeout(
+        () => reject(createBrowserError("TIMEOUT", "browser script 执行超时", { surfaceId: runtime.surfaceId, timeoutMs })),
+        timeoutMs
+      )
+    )
+  ]);
+}
+
+function serializeForInjectedScript(value: unknown): string {
+  return JSON.stringify(value ?? null).replaceAll("</script", "<\\/script");
+}
+
+function getSelectorActionScript(action: "click" | "fill", selector: string, wait: BrowserSelectorWait, timeoutMs: number, text?: string): string {
+  return `(() => new Promise((resolve, reject) => {
+    const selector = ${serializeForInjectedScript(selector)};
+    const wait = ${serializeForInjectedScript(wait)};
+    const timeoutMs = ${timeoutMs};
+    const text = ${serializeForInjectedScript(text ?? "")};
+    const startedAt = Date.now();
+    const isVisible = (element) => {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    };
+    const tick = () => {
+      const matches = Array.from(document.querySelectorAll(selector));
+      const element = matches.find((item) => wait !== "visible" || isVisible(item));
+      if (!element && Date.now() - startedAt < timeoutMs) {
+        window.setTimeout(tick, 50);
+        return;
+      }
+      if (!element) {
+        reject(Object.assign(new Error("selector did not appear before timeout"), { code: "TIMEOUT", matched: matches.length }));
+        return;
+      }
+      try {
+        if (${serializeForInjectedScript(action)} === "click") {
+          element.scrollIntoView({ block: "center", inline: "center" });
+          element.click();
+          resolve({ matched: matches.length, url: location.href });
+          return;
+        }
+        const editable = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element.isContentEditable;
+        if (!editable) {
+          reject(Object.assign(new Error("target is not fillable"), { code: "BAD_REQUEST" }));
+          return;
+        }
+        element.focus();
+        if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+          element.value = text;
+        } else {
+          element.textContent = text;
+        }
+        element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+        element.dispatchEvent(new Event("change", { bubbles: true }));
+        resolve({ matched: matches.length, valueLength: text.length });
+      } catch (error) {
+        reject(error);
+      }
+    };
+    tick();
+  }))()`;
+}
+
+function getSnapshotScript(params: BrowserSnapshotParams): string {
+  return `(() => {
+    const rootSelector = ${serializeForInjectedScript(params.selector)};
+    const format = ${serializeForInjectedScript(params.format ?? "text")};
+    const includeHidden = ${params.includeHidden === true};
+    const maxTextLength = ${Math.max(1, Math.floor(params.maxTextLength ?? 2000))};
+    const root = rootSelector ? document.querySelector(rootSelector) : document.body;
+    if (!root) {
+      throw Object.assign(new Error("snapshot selector not found"), { code: "TIMEOUT" });
+    }
+    const isVisible = (element) => {
+      if (includeHidden || !(element instanceof HTMLElement)) return true;
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    };
+    const selectorFor = (element) => {
+      if (!(element instanceof Element)) return undefined;
+      if (element.id) return "#" + CSS.escape(element.id);
+      const tag = element.tagName.toLowerCase();
+      const parent = element.parentElement;
+      if (!parent) return tag;
+      const index = Array.from(parent.children).filter((item) => item.tagName === element.tagName).indexOf(element) + 1;
+      return index > 1 ? tag + ":nth-of-type(" + index + ")" : tag;
+    };
+    const roleFor = (element) => {
+      const explicit = element.getAttribute("role");
+      if (explicit) return explicit;
+      const tag = element.tagName.toLowerCase();
+      if (tag === "button") return "button";
+      if (tag === "a") return "link";
+      if (tag === "input" || tag === "textarea") return "textbox";
+      if (/^h[1-6]$/.test(tag)) return "heading";
+      return undefined;
+    };
+    const textFor = (element) => {
+      const text = (element.innerText || element.textContent || "").replace(/\\s+/g, " ").trim();
+      return text ? text.slice(0, maxTextLength) : undefined;
+    };
+    const buildNode = (element) => {
+      if (!(element instanceof Element) || !isVisible(element)) return null;
+      const children = Array.from(element.children).map(buildNode).filter(Boolean);
+      const node = {
+        role: roleFor(element),
+        tag: element.tagName.toLowerCase(),
+        id: element.id || undefined,
+        name: element.getAttribute("aria-label") || element.getAttribute("name") || undefined,
+        text: textFor(element),
+        selector: selectorFor(element),
+        children: children.length ? children : undefined
+      };
+      return node;
+    };
+    const node = buildNode(root);
+    if (format === "json") {
+      return { title: document.title, url: location.href, snapshot: node };
+    }
+    const lines = ["title: " + document.title, "url: " + location.href];
+    const walk = (item, depth) => {
+      if (!item) return;
+      const text = item.text ? " \\"" + item.text.replaceAll("\\"", "\\\\\\"") + "\\"" : "";
+      const selector = item.selector ? " selector=\\"" + item.selector.replaceAll("\\"", "\\\\\\"") + "\\"" : "";
+      lines.push("  ".repeat(depth) + item.tag + text + selector);
+      for (const child of item.children || []) walk(child, depth + 1);
+    };
+    walk(node, 0);
+    return { title: document.title, url: location.href, snapshot: lines.join("\\n") };
+  })()`;
+}
+
+function getValueType(value: unknown): "null" | "boolean" | "number" | "string" | "object" | "array" {
+  if (value === null || value === undefined) {
+    return "null";
+  }
+  if (Array.isArray(value)) {
+    return "array";
+  }
+  const valueType = typeof value;
+  if (valueType === "boolean" || valueType === "number" || valueType === "string") {
+    return valueType;
+  }
+  return "object";
+}
+
+async function runBrowserRpc(
+  method: BrowserRpcMethod,
+  params: unknown,
+  workspaces: Workspace[],
+  activeWorkspaceId: string,
+  createSurface: (selector: BrowserSurfaceSelector, url: string) => Promise<{ surface: Surface; paneId: string; workspaceId: string }>
+): Promise<unknown> {
+  ensureNoCreateForNonNavigate(method, params);
+  const selector = (isRecord(params) ? params : {}) as BrowserSurfaceSelector;
+  const forceCreate = method === "browser.navigate" && isRecord(params) && params.forceCreate === true;
+  let resolved = forceCreate ? null : resolveBrowserSurface(workspaces, activeWorkspaceId, selector);
+  if ((!resolved || forceCreate) && method === "browser.navigate" && selector.createIfMissing === true) {
+    const navigateParams = params as Partial<BrowserNavigateParams>;
+    if (typeof navigateParams.url !== "string" || !navigateParams.url.trim()) {
+      throw createBrowserError("BAD_REQUEST", "browser.navigate 需要 url");
+    }
+    const created = await createSurface(selector, navigateParams.url);
+    const runtime = await waitForBrowserRuntime(created.surface.id, getBrowserTimeout(params, 10_000));
+    const finalUrl = await runtime.navigate(navigateParams.url, readBrowserWaitUntil(params), getBrowserTimeout(params, 10_000));
+    const titleResult = await executeBrowserJavaScript<string>(runtime, "document.title", 1000).catch(() => "");
+    return { surfaceId: created.surface.id, workspaceId: created.workspaceId, paneId: created.paneId, url: finalUrl, title: titleResult };
+  }
+
+  if (!resolved) {
+    throw createBrowserError("NOT_FOUND", "找不到 browser surface");
+  }
+
+  const runtime = await waitForBrowserRuntime(resolved.surface.id, getBrowserTimeout(params, method === "browser.screenshot" ? 10_000 : 5000));
+  const commonResult = { surfaceId: resolved.surface.id, workspaceId: resolved.workspace.id, paneId: resolved.paneId };
+
+  if (method === "browser.navigate") {
+    const navigateParams = params as Partial<BrowserNavigateParams>;
+    if (typeof navigateParams.url !== "string" || !navigateParams.url.trim()) {
+      throw createBrowserError("BAD_REQUEST", "browser.navigate 需要 url");
+    }
+    const timeoutMs = getBrowserTimeout(params, 10_000);
+    const finalUrl = await runtime.navigate(navigateParams.url, readBrowserWaitUntil(params), timeoutMs);
+    const title = await executeBrowserJavaScript<string>(runtime, "document.title", 1000).catch(() => "");
+    return { ...commonResult, url: finalUrl, title };
+  }
+
+  if (method === "browser.click") {
+    const clickParams = params as Partial<BrowserClickParams>;
+    if (typeof clickParams.selector !== "string" || !clickParams.selector.trim()) {
+      throw createBrowserError("BAD_REQUEST", "browser.click 需要 selector");
+    }
+    const timeoutMs = getBrowserTimeout(params, 5000);
+    const result = await executeBrowserJavaScript<{ matched: number; url: string }>(
+      runtime,
+      getSelectorActionScript("click", clickParams.selector, readSelectorWait(params), timeoutMs),
+      timeoutMs + 500
+    );
+    return { ...commonResult, selector: clickParams.selector, matched: result.matched, clicked: true, url: result.url };
+  }
+
+  if (method === "browser.fill") {
+    const fillParams = params as Partial<BrowserFillParams>;
+    if (typeof fillParams.selector !== "string" || !fillParams.selector.trim() || typeof fillParams.text !== "string") {
+      throw createBrowserError("BAD_REQUEST", "browser.fill 需要 selector 和 text");
+    }
+    const timeoutMs = getBrowserTimeout(params, 5000);
+    const result = await executeBrowserJavaScript<{ matched: number; valueLength: number }>(
+      runtime,
+      getSelectorActionScript("fill", fillParams.selector, readSelectorWait(params), timeoutMs, fillParams.text),
+      timeoutMs + 500
+    );
+    return { ...commonResult, selector: fillParams.selector, filled: true, valueLength: result.valueLength };
+  }
+
+  if (method === "browser.eval") {
+    const evalParams = params as Partial<BrowserEvalParams>;
+    if (typeof evalParams.script !== "string" || !evalParams.script.trim()) {
+      throw createBrowserError("BAD_REQUEST", "browser.eval 需要 script");
+    }
+    const value = await executeBrowserJavaScript(runtime, evalParams.script, getBrowserTimeout(params, 5000));
+    return { ...commonResult, value: value ?? null, valueType: getValueType(value) };
+  }
+
+  if (method === "browser.snapshot") {
+    const snapshotParams = (isRecord(params) ? params : {}) as BrowserSnapshotParams;
+    const result = await executeBrowserJavaScript<{ title: string; url: string; snapshot: string | BrowserSnapshotNode }>(
+      runtime,
+      getSnapshotScript(snapshotParams),
+      getBrowserTimeout(params, 5000)
+    );
+    return { ...commonResult, url: result.url, title: result.title, format: snapshotParams.format ?? "text", snapshot: result.snapshot };
+  }
+
+  const screenshotParams = (isRecord(params) ? params : {}) as BrowserScreenshotParams;
+  if (screenshotParams.fullPage) {
+    throw createBrowserError("UNSUPPORTED", "P0 暂不支持 fullPage screenshot");
+  }
+  if (screenshotParams.selector) {
+    throw createBrowserError("UNSUPPORTED", "P0 暂不支持 selector screenshot");
+  }
+  if (screenshotParams.format && screenshotParams.format !== "png" && screenshotParams.format !== "jpeg") {
+    throw createBrowserError("BAD_REQUEST", "screenshot format 必须是 png 或 jpeg");
+  }
+  if (!runtime.webview.capturePage) {
+    throw createBrowserError("BROWSER_ERROR", "当前 webview 不支持 capturePage", { surfaceId: runtime.surfaceId });
+  }
+  const image = await Promise.race([
+    runtime.webview.capturePage(),
+    new Promise<never>((_resolve, reject) =>
+      window.setTimeout(
+        () => reject(createBrowserError("TIMEOUT", "browser screenshot 超时", { surfaceId: runtime.surfaceId })),
+        getBrowserTimeout(params, 10_000)
+      )
+    )
+  ]);
+  const mimeType = screenshotParams.format === "jpeg" ? "image/jpeg" : "image/png";
+  const dataUrl = image.toDataURL().replace(/^data:image\/png/, `data:${mimeType}`);
+  const base64 = dataUrl.split(",")[1] ?? "";
+  const url = runtime.webview.getURL?.() ?? "";
+  if (screenshotParams.path) {
+    const written = await window.wmux?.browser.writeScreenshot({
+      path: screenshotParams.path,
+      base64,
+      format: screenshotParams.format ?? "png"
+    });
+    return { ...commonResult, url, path: written?.path ?? screenshotParams.path, mimeType, bytes: written?.bytes ?? base64.length };
+  }
+
+  return { ...commonResult, url, mimeType, bytes: base64.length, base64 };
 }
 
 function createWorkspaceSummaries(workspaces: Workspace[], activeWorkspaceId: string): WorkspaceSummary[] {
@@ -518,6 +1221,11 @@ export function App(): ReactElement {
     { id: "powershell", label: "Windows PowerShell" },
     { id: "cmd", label: "CMD" }
   ]);
+  const [projectConfig, setProjectConfig] = useState<WmuxProjectConfigResult | null>(null);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [commandQuery, setCommandQuery] = useState("");
+  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+  const [pendingTerminalCommands, setPendingTerminalCommands] = useState<PendingTerminalCommand[]>([]);
 
   useEffect(() => {
     void window.wmux?.getVersion().then(setAppVersion).catch(() => setAppVersion("dev"));
@@ -525,7 +1233,7 @@ export function App(): ReactElement {
       .listShells()
       .then((options) => {
         setShellOptions(options);
-        if (!options.some((option) => option.id === shellProfile)) {
+        if (!options.some((option) => option.id === shellProfileRef.current)) {
           setShellProfile("auto");
         }
       })
@@ -536,6 +1244,31 @@ export function App(): ReactElement {
           { id: "cmd", label: "CMD" }
         ]);
       });
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    void window.wmux?.config
+      .loadProjectConfig()
+      .then((config) => {
+        if (isMounted) {
+          setProjectConfig(config);
+        }
+      })
+      .catch((error) => {
+        if (isMounted) {
+          setProjectConfig({
+            path: "wmux.json",
+            found: true,
+            config: { commands: [] },
+            errors: [`读取项目配置失败：${error instanceof Error ? error.message : String(error)}`]
+          });
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -585,6 +1318,16 @@ export function App(): ReactElement {
     return () => window.clearTimeout(saveTimer);
   }, [activeWorkspaceId, hasHydratedPersistedState, workspaces]);
 
+  const projectCommands = projectConfig?.config.commands ?? [];
+  const filteredCommands = projectCommands.filter((command) => commandMatchesQuery(command, commandQuery));
+  const normalizedSelectedCommandIndex = filteredCommands.length
+    ? Math.min(selectedCommandIndex, filteredCommands.length - 1)
+    : 0;
+  const configStatusText = projectConfig?.found
+    ? `${projectCommands.length} 个项目命令`
+    : "未发现 wmux.json";
+  const configErrorText = projectConfig?.errors.join("；");
+
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
   const workspacesRef = useRef(workspaces);
   const activeWorkspaceIdRef = useRef(activeWorkspaceId);
@@ -601,6 +1344,122 @@ export function App(): ReactElement {
   useEffect(() => {
     shellProfileRef.current = shellProfile;
   }, [shellProfile]);
+
+  useEffect(() => {
+    if (selectedCommandIndex > normalizedSelectedCommandIndex) {
+      setSelectedCommandIndex(normalizedSelectedCommandIndex);
+    }
+  }, [normalizedSelectedCommandIndex, selectedCommandIndex]);
+
+  useEffect(() => {
+    const handleGlobalKeyDown = (event: KeyboardEvent): void => {
+      const isCommandShortcut = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k";
+      if (!isCommandShortcut) {
+        return;
+      }
+
+      event.preventDefault();
+      setCommandPaletteOpen(true);
+      setCommandQuery("");
+      setSelectedCommandIndex(0);
+    };
+
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (!pendingTerminalCommands.length) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      pendingTerminalCommands.forEach((pendingCommand) => {
+        window.wmux?.terminal.input({
+          id: `${pendingCommand.surfaceId}:${shellProfileRef.current}`,
+          data: appendCommandNewline(pendingCommand.command)
+        });
+      });
+      setPendingTerminalCommands([]);
+    }, 1200);
+
+    return () => window.clearTimeout(timer);
+  }, [pendingTerminalCommands]);
+
+  const openCommandPalette = (): void => {
+    setCommandPaletteOpen(true);
+    setCommandQuery("");
+    setSelectedCommandIndex(0);
+  };
+
+  const closeCommandPalette = (): void => {
+    setCommandPaletteOpen(false);
+    setCommandQuery("");
+    setSelectedCommandIndex(0);
+  };
+
+  const runSimpleCommand = (command: WmuxCommandConfig): void => {
+    if (!command.command) {
+      return;
+    }
+
+    const terminalSurface = getActiveTerminalSurface(activeWorkspace);
+    if (terminalSurface) {
+      window.wmux?.terminal.input({
+        id: `${terminalSurface.id}:${shellProfileRef.current}`,
+        data: appendCommandNewline(command.command)
+      });
+      updateActiveWorkspace((workspace) => ({
+        ...workspace,
+        status: "running",
+        notice: `已运行命令：${command.name}`
+      }));
+      return;
+    }
+
+    const pane = activeWorkspace.panes[activeWorkspace.activePaneId];
+    const surface = createTerminalSurface();
+    setWorkspaces((currentWorkspaces) =>
+      currentWorkspaces.map((workspace) =>
+        workspace.id === activeWorkspace.id
+          ? {
+              ...workspace,
+              status: "running",
+              notice: `已运行命令：${command.name}`,
+              panes: {
+                ...workspace.panes,
+                [workspace.activePaneId]: {
+                  ...pane,
+                  surfaceIds: [...pane.surfaceIds, surface.id],
+                  activeSurfaceId: surface.id
+                }
+              },
+              surfaces: {
+                ...workspace.surfaces,
+                [surface.id]: surface
+              }
+            }
+          : workspace
+      )
+    );
+    setPendingTerminalCommands((items) => [...items, { surfaceId: surface.id, command: command.command ?? "" }]);
+  };
+
+  const runWorkspaceCommand = (command: WmuxCommandConfig): void => {
+    const buildResult = createWorkspaceFromCommand(command);
+    setWorkspaces((currentWorkspaces) => [...currentWorkspaces, buildResult.workspace]);
+    setActiveWorkspaceId(buildResult.workspace.id);
+    setPendingTerminalCommands((items) => [...items, ...buildResult.terminalCommands]);
+  };
+
+  const runProjectCommand = (command: WmuxCommandConfig): void => {
+    if (command.workspace) {
+      runWorkspaceCommand(command);
+    } else {
+      runSimpleCommand(command);
+    }
+    closeCommandPalette();
+  };
 
   const updateActiveWorkspace = (updater: (workspace: Workspace) => Workspace): void => {
     setWorkspaces((currentWorkspaces) =>
@@ -673,6 +1532,56 @@ export function App(): ReactElement {
           )
         );
         window.wmux?.socket.respond(createSocketSuccessResponse(request.id, { workspaceId: targetWorkspaceId, notice }));
+        return;
+      }
+
+      if (isBrowserRpcMethod(request.method)) {
+        void runBrowserRpc(
+          request.method,
+          request.params,
+          workspacesRef.current,
+          activeWorkspaceIdRef.current,
+          async (selector, url) =>
+            new Promise((resolve, reject) => {
+              setWorkspaces((currentWorkspaces) => {
+                try {
+                  const created = createBrowserSurfaceInWorkspace(currentWorkspaces, activeWorkspaceIdRef.current, selector, url);
+                  window.setTimeout(
+                    () =>
+                      resolve({
+                        surface: created.surface,
+                        paneId: created.paneId,
+                        workspaceId: created.workspaceId
+                      }),
+                    0
+                  );
+                  return created.workspaces;
+                } catch (error) {
+                  reject(error);
+                  return currentWorkspaces;
+                }
+              });
+            })
+        )
+          .then((result) => {
+            window.wmux?.socket.respond(createSocketSuccessResponse(request.id, result));
+          })
+          .catch((error) => {
+            const code =
+              error instanceof Error && "code" in error && typeof error.code === "string"
+                ? (error.code as SocketRpcErrorCode)
+                : "BROWSER_ERROR";
+            const details =
+              error instanceof Error && "details" in error && isRecord(error.details)
+                ? (error.details as SocketRpcErrorDetails)
+                : undefined;
+            window.wmux?.socket.respond(
+              createSocketErrorResponse(request.id, code, error instanceof Error ? error.message : String(error), {
+                ...details,
+                method: request.method
+              })
+            );
+          });
         return;
       }
 
@@ -836,7 +1745,9 @@ export function App(): ReactElement {
         pane.activeSurfaceId === surfaceId
           ? nextSurfaceIds[Math.max(0, Math.min(surfaceIndex, nextSurfaceIds.length - 1))]
           : pane.activeSurfaceId;
-      const { [surfaceId]: _closedSurface, ...remainingSurfaces } = workspace.surfaces;
+      const remainingSurfaces = Object.fromEntries(
+        Object.entries(workspace.surfaces).filter(([currentSurfaceId]) => currentSurfaceId !== surfaceId)
+      );
 
       return {
         ...workspace,
@@ -897,7 +1808,9 @@ export function App(): ReactElement {
           return workspace;
         }
 
-        const { [payload.paneId]: _removedPane, ...remainingPanes } = workspace.panes;
+        const remainingPanes = Object.fromEntries(
+          Object.entries(workspace.panes).filter(([currentPaneId]) => currentPaneId !== payload.paneId)
+        );
 
         return {
           ...workspace,
@@ -962,7 +1875,9 @@ export function App(): ReactElement {
 
       const pane = workspace.panes[paneId];
       const closedSurfaceIds = new Set(pane?.surfaceIds ?? []);
-      const { [paneId]: _closedPane, ...remainingPanes } = workspace.panes;
+      const remainingPanes = Object.fromEntries(
+        Object.entries(workspace.panes).filter(([currentPaneId]) => currentPaneId !== paneId)
+      );
       const remainingSurfaces = Object.fromEntries(
         Object.entries(workspace.surfaces).filter(([surfaceId]) => !closedSurfaceIds.has(surfaceId))
       );
@@ -994,6 +1909,7 @@ export function App(): ReactElement {
         onCommitRename={handleCommitRenameWorkspace}
         onCancelRename={handleCancelRenameWorkspace}
         onClose={handleCloseWorkspace}
+        onOpenCommandPalette={openCommandPalette}
       />
       <section className="workspaceArea">
         <TitleBar
@@ -1006,6 +1922,7 @@ export function App(): ReactElement {
           onAddBrowser={() => handleAddBrowserSurface(activeWorkspace.activePaneId)}
           onSplitHorizontal={() => handleSplitActivePane("horizontal")}
           onSplitVertical={() => handleSplitActivePane("vertical")}
+          onOpenCommandPalette={openCommandPalette}
         />
         <div className="surfaceStage">
           <LayoutRenderer
@@ -1023,7 +1940,145 @@ export function App(): ReactElement {
           />
         </div>
       </section>
+      <CommandPalette
+        commands={filteredCommands}
+        configError={configErrorText}
+        configStatus={configStatusText}
+        isOpen={commandPaletteOpen}
+        query={commandQuery}
+        selectedIndex={normalizedSelectedCommandIndex}
+        onClose={closeCommandPalette}
+        onQueryChange={(value) => {
+          setCommandQuery(value);
+          setSelectedCommandIndex(0);
+        }}
+        onRun={runProjectCommand}
+        onSelectedIndexChange={setSelectedCommandIndex}
+      />
     </main>
+  );
+}
+
+function CommandPalette({
+  commands,
+  configError,
+  configStatus,
+  isOpen,
+  query,
+  selectedIndex,
+  onClose,
+  onQueryChange,
+  onRun,
+  onSelectedIndexChange
+}: {
+  commands: WmuxCommandConfig[];
+  configError?: string;
+  configStatus: string;
+  isOpen: boolean;
+  query: string;
+  selectedIndex: number;
+  onClose: () => void;
+  onQueryChange: (value: string) => void;
+  onRun: (command: WmuxCommandConfig) => void;
+  onSelectedIndexChange: (index: number) => void;
+}): ReactElement | null {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    window.setTimeout(() => inputRef.current?.focus(), 0);
+  }, [isOpen]);
+
+  if (!isOpen) {
+    return null;
+  }
+
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>): void => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      onSelectedIndexChange(commands.length ? (selectedIndex + 1) % commands.length : 0);
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      onSelectedIndexChange(commands.length ? (selectedIndex - 1 + commands.length) % commands.length : 0);
+      return;
+    }
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const command = commands[selectedIndex];
+      if (command) {
+        onRun(command);
+      }
+    }
+  };
+
+  return (
+    <div className="commandPaletteOverlay" role="presentation" onMouseDown={onClose}>
+      <section
+        className="commandPalette"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="commandPaletteHeader">
+          <Command size={18} />
+          <input
+            ref={inputRef}
+            aria-label="Command search"
+            value={query}
+            placeholder="搜索 wmux 命令或工作区布局"
+            onChange={(event) => onQueryChange(event.target.value)}
+            onKeyDown={handleKeyDown}
+          />
+          <kbd>Esc</kbd>
+        </div>
+        <div className="commandPaletteStatus">
+          <span>{configStatus}</span>
+          {configError && <span className="commandPaletteError">{configError}</span>}
+        </div>
+        <div className="commandPaletteList" role="listbox" aria-label="Command results">
+          {commands.length ? (
+            commands.map((command, index) => (
+              <button
+                className={`commandPaletteItem ${index === selectedIndex ? "commandPaletteItemActive" : ""}`}
+                key={`${command.name}-${index}`}
+                type="button"
+                role="option"
+                aria-selected={index === selectedIndex}
+                onMouseEnter={() => onSelectedIndexChange(index)}
+                onClick={() => onRun(command)}
+              >
+                <span className="commandPaletteItemIcon">
+                  {command.workspace ? <LayoutGrid size={16} /> : <Terminal size={16} />}
+                </span>
+                <span className="commandPaletteItemMain">
+                  <span className="commandPaletteItemTitle">{command.name}</span>
+                  <span className="commandPaletteItemDescription">
+                    {command.description ?? command.command ?? command.workspace?.name ?? "项目自定义命令"}
+                  </span>
+                </span>
+                <span className="commandPaletteItemMeta">{getCommandTypeLabel(command)}</span>
+              </button>
+            ))
+          ) : (
+            <div className="commandPaletteEmpty">没有匹配的项目命令</div>
+          )}
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -1038,7 +2093,8 @@ function WorkspaceSidebar({
   onRenameDraftChange,
   onCommitRename,
   onCancelRename,
-  onClose
+  onClose,
+  onOpenCommandPalette
 }: {
   workspaces: Workspace[];
   activeWorkspaceId: string;
@@ -1051,6 +2107,7 @@ function WorkspaceSidebar({
   onCommitRename: () => void;
   onCancelRename: () => void;
   onClose: (id: string) => void;
+  onOpenCommandPalette: () => void;
 }): ReactElement {
   return (
     <aside className="sidebar">
@@ -1064,7 +2121,7 @@ function WorkspaceSidebar({
         </div>
       </div>
 
-      <button className="searchButton" type="button">
+      <button className="searchButton" type="button" onClick={onOpenCommandPalette}>
         <Search size={15} />
         <span>Search workspace</span>
         <kbd>⌘K</kbd>
@@ -1193,7 +2250,8 @@ function TitleBar({
   onAddTerminal,
   onAddBrowser,
   onSplitHorizontal,
-  onSplitVertical
+  onSplitVertical,
+  onOpenCommandPalette
 }: {
   workspace: Workspace;
   version: string;
@@ -1204,6 +2262,7 @@ function TitleBar({
   onAddBrowser: () => void;
   onSplitHorizontal: () => void;
   onSplitVertical: () => void;
+  onOpenCommandPalette: () => void;
 }): ReactElement {
   return (
     <header className="titleBar">
@@ -1216,7 +2275,7 @@ function TitleBar({
         </div>
       </div>
       <div className="titleActions">
-        <button className="commandButton" type="button">
+        <button className="commandButton" type="button" onClick={onOpenCommandPalette}>
           <Command size={15} />
           <span>Command</span>
         </button>
@@ -1604,7 +2663,7 @@ function BrowserSurface({
 }): ReactElement {
   const initialUrl = normalizeBrowserUrl(surface.subtitle ?? "https://example.com");
   const session = browserSessions.get(surface.id) ?? { history: [initialUrl], historyIndex: 0, url: initialUrl };
-  const webviewRef = useRef<any>(null);
+  const webviewRef = useRef<BrowserWebviewElement | null>(null);
   const webviewReadyRef = useRef(false);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const browserHistoryRef = useRef(session.history);
@@ -1616,7 +2675,7 @@ function BrowserSurface({
   const [canGoForward, setCanGoForward] = useState(false);
   const [viewportSize, setViewportSize] = useState<{ width: number; height: number } | null>(null);
 
-  const applyBrowserZoom = (): void => {
+  const applyBrowserZoom = useCallback((): void => {
     if (!webviewReadyRef.current) {
       return;
     }
@@ -1627,15 +2686,15 @@ function BrowserSurface({
     } catch {
       webviewReadyRef.current = false;
     }
-  };
+  }, [viewportSize?.width]);
 
-  const persistBrowserSession = (nextUrl: string): void => {
+  const persistBrowserSession = useCallback((nextUrl: string): void => {
     browserSessions.set(surface.id, {
       history: browserHistoryRef.current,
       historyIndex: browserHistoryIndexRef.current,
       url: nextUrl
     });
-  };
+  }, [surface.id]);
 
   useEffect(() => {
     const webview = webviewRef.current;
@@ -1678,7 +2737,7 @@ function BrowserSurface({
       webview.removeEventListener("did-navigate-in-page", syncNavigationState);
       webview.removeEventListener("did-finish-load", syncNavigationState);
     };
-  }, [onUpdateSurfaceSubtitle, surface.id, url, viewportSize?.width]);
+  }, [applyBrowserZoom, onUpdateSurfaceSubtitle, persistBrowserSession, surface.id, url]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -1705,7 +2764,7 @@ function BrowserSurface({
 
   useEffect(() => {
     applyBrowserZoom();
-  }, [viewportSize?.width, url]);
+  }, [applyBrowserZoom, viewportSize?.width, url]);
 
   const navigate = (nextUrl: string): void => {
     const normalizedUrl = normalizeBrowserUrl(nextUrl);
@@ -1724,6 +2783,97 @@ function BrowserSurface({
     onUpdateSurfaceSubtitle(surface.id, normalizedUrl);
     webviewRef.current?.loadURL?.(normalizedUrl);
   };
+
+  const navigateBrowserRuntime = useCallback(
+    (nextUrl: string, waitUntil: BrowserWaitUntil, timeoutMs: number): Promise<string> => {
+      const normalizedUrl = normalizeBrowserUrl(nextUrl);
+      return new Promise((resolve, reject) => {
+        const webview = webviewRef.current;
+        if (!webview?.loadURL) {
+          reject(createBrowserError("BROWSER_ERROR", "browser webview 尚未就绪", { surfaceId: surface.id }));
+          return;
+        }
+
+        let settled = false;
+        const cleanup = (): void => {
+          webview.removeEventListener("did-fail-load", handleFailLoad);
+          webview.removeEventListener("did-finish-load", handleLoad);
+          webview.removeEventListener("dom-ready", handleDomContentLoaded);
+          window.clearTimeout(timer);
+        };
+        const settle = (callback: () => void): void => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          cleanup();
+          callback();
+        };
+        const handleFailLoad = (event: Event): void => {
+          const failure = event as Event & { errorDescription?: string };
+          settle(() =>
+            reject(
+              createBrowserError("BROWSER_ERROR", failure.errorDescription ?? "browser navigation failed", {
+                surfaceId: surface.id,
+                url: normalizedUrl
+              })
+            )
+          );
+        };
+        const handleDomContentLoaded = (): void => {
+          if (waitUntil === "domcontentloaded") {
+            settle(() => resolve(webview.getURL?.() ?? normalizedUrl));
+          }
+        };
+        const handleLoad = (): void => {
+          if (waitUntil === "load") {
+            settle(() => resolve(webview.getURL?.() ?? normalizedUrl));
+          }
+        };
+        const timer = window.setTimeout(() => {
+          settle(() =>
+            reject(
+              createBrowserError("TIMEOUT", "browser navigation timeout", {
+                surfaceId: surface.id,
+                url: normalizedUrl,
+                timeoutMs
+              })
+            )
+          );
+        }, timeoutMs);
+
+        webview.addEventListener("did-fail-load", handleFailLoad);
+        webview.addEventListener("did-finish-load", handleLoad);
+        webview.addEventListener("dom-ready", handleDomContentLoaded);
+        navigate(normalizedUrl);
+        if (waitUntil === "none") {
+          window.setTimeout(() => settle(() => resolve(normalizedUrl)), 0);
+        }
+      });
+    },
+    [surface.id]
+  );
+
+  useEffect(() => {
+    const webview = webviewRef.current;
+    if (!webview) {
+      return;
+    }
+
+    browserRuntimes.set(surface.id, {
+      surfaceId: surface.id,
+      runtimeId: surface.id,
+      webview,
+      navigate: navigateBrowserRuntime
+    });
+
+    return () => {
+      const currentRuntime = browserRuntimes.get(surface.id);
+      if (currentRuntime?.webview === webview) {
+        browserRuntimes.delete(surface.id);
+      }
+    };
+  }, [navigateBrowserRuntime, surface.id]);
 
   const loadHistoryEntry = (index: number): void => {
     const nextUrl = browserHistoryRef.current[index];

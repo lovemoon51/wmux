@@ -31,9 +31,10 @@ Renderer Process
   - command palette
   - settings UI
 
-Browser WebContents
-  - one BrowserSurface maps to one WebContentsView
-  - navigation/state/automation via main process
+Browser Surface
+  - P0: one BrowserSurface maps to one renderer <webview>
+  - future: optional migration to main-managed WebContentsView
+  - socket/CLI protocol remains stable across both implementations
 
 CLI Process
   - wmux command
@@ -116,10 +117,13 @@ TerminalRuntime
 
 BrowserRuntime
   surfaceId
-  webContentsId
+  runtimeId
+  viewId?
   url
   history
 ```
+
+`BrowserRuntime.runtimeId` 是 browser surface 的运行时标识。P0 使用 renderer `<webview>` 时可等于 `surfaceId` 或 renderer 生成的 view id；`viewId` 可为空。后续迁移到 Main `WebContentsView` 时，`viewId` 可映射到 Electron `webContents.id` 或内部 view id。
 
 ## 5. Layout Tree
 
@@ -162,10 +166,11 @@ type LayoutNode =
 
 ## 7. Browser 实现
 
-- Main 为每个 browser surface 创建 WebContentsView。
-- Renderer 只渲染 chrome UI：地址栏、tab title、loading、错误状态。
-- Main 根据当前 pane 的 DOM bounds 放置 WebContentsView。
-- Browser automation 通过 WebContents debug protocol 或 Electron API 实现。
+- P0 当前实现采用 Renderer 内的 Electron `<webview>` 作为 browser surface。
+- Renderer 渲染 browser chrome UI：地址栏、tab title、loading、错误状态，并持有对应 `<webview>` 元素。
+- Browser automation P0 通过 socket request 分发到 Renderer，再由 Renderer 定位 `<webview>` 并执行导航、DOM 操作、snapshot 和截图协调。
+- 后续原生化/性能优化阶段可迁移到 Main 管理 `WebContentsView`：Main 为每个 browser surface 创建 `WebContentsView`，根据 pane bounds 放置视图，并通过 WebContents debug protocol 或 Electron API 实现自动化。
+- P0 与后续 `WebContentsView` 方案必须共享同一套 socket/CLI 语义，避免对外协议变化。
 
 ## 8. Socket RPC
 

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { connect } from "node:net";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -24,7 +25,21 @@ function printUsage() {
   wmux ping [--json]
   wmux list-workspaces [--json]
   wmux send <text> [--json]
-  wmux notify --title <title> [--body <body>] [--json]`);
+  wmux notify --title <title> [--body <body>] [--json]
+  wmux browser navigate <url> [--surface <id>] [--create] [--wait load|domcontentloaded|none] [--timeout <ms>] [--json]
+  wmux browser open <url> [--json]
+  wmux browser click <selector> [--timeout <ms>] [--wait visible|attached|none] [--json]
+  wmux browser fill <selector> <text> [--text <text>] [--text-file <path>] [--json]
+  wmux browser eval <script> [--json]
+  wmux browser eval-file <path> [--json]
+  wmux browser snapshot [--selector <selector>] [--json] [--out <path>]
+  wmux browser screenshot [--out <path>] [--format png|jpeg] [--base64] [--json]`);
+}
+
+function cliError(message) {
+  const error = new Error(message);
+  error.cliExitCode = 2;
+  return error;
 }
 
 function parseOption(name) {
@@ -32,8 +47,155 @@ function parseOption(name) {
   if (index < 0) {
     return undefined;
   }
-
   return args[index + 1];
+}
+
+function hasFlag(name) {
+  return args.includes(name);
+}
+
+function readTimeout() {
+  const rawTimeout = parseOption("--timeout");
+  if (rawTimeout === undefined) {
+    return undefined;
+  }
+  const timeoutMs = Number(rawTimeout);
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw cliError("--timeout 必须是正数毫秒");
+  }
+  return Math.floor(timeoutMs);
+}
+
+function readSelectorParams(allowCreate) {
+  const surfaceId = parseOption("--surface");
+  const paneId = parseOption("--pane");
+  const workspaceId = parseOption("--workspace");
+  const active = hasFlag("--active");
+  const explicitTargets = [surfaceId, paneId, workspaceId].filter(Boolean).length;
+
+  if (explicitTargets > 1) {
+    throw cliError("--surface、--pane、--workspace 至多传一个");
+  }
+  if (active && explicitTargets > 0) {
+    throw cliError("--active 不能与显式目标同时使用");
+  }
+  if (hasFlag("--create") && !allowCreate) {
+    throw cliError("--create 只允许 browser navigate/open");
+  }
+
+  return {
+    ...(surfaceId ? { surfaceId } : {}),
+    ...(paneId ? { paneId } : {}),
+    ...(workspaceId ? { workspaceId } : {}),
+    ...(active ? { active: true } : {}),
+    ...(hasFlag("--create") ? { createIfMissing: true } : {})
+  };
+}
+
+function createBrowserRequest() {
+  const browserCommand = args[1];
+
+  if (browserCommand === "navigate" || browserCommand === "open") {
+    const url = args[2];
+    if (!url || url.startsWith("--")) {
+      throw cliError("browser navigate/open 需要 url");
+    }
+    return {
+      method: "browser.navigate",
+      params: {
+        ...readSelectorParams(true),
+        url,
+        ...(browserCommand === "open" ? { createIfMissing: true, forceCreate: true } : {}),
+        ...(parseOption("--wait") ? { waitUntil: parseOption("--wait") } : {}),
+        ...(readTimeout() ? { timeoutMs: readTimeout() } : {})
+      }
+    };
+  }
+
+  if (browserCommand === "click") {
+    const selector = args[2];
+    if (!selector || selector.startsWith("--")) {
+      throw cliError("browser click 需要 selector");
+    }
+    return {
+      method: "browser.click",
+      params: {
+        ...readSelectorParams(false),
+        selector,
+        ...(parseOption("--wait") ? { wait: parseOption("--wait") } : {}),
+        ...(parseOption("--load-wait") ? { waitUntil: parseOption("--load-wait") } : {}),
+        ...(readTimeout() ? { timeoutMs: readTimeout() } : {})
+      }
+    };
+  }
+
+  if (browserCommand === "fill") {
+    const selector = args[2];
+    if (!selector || selector.startsWith("--")) {
+      throw cliError("browser fill 需要 selector");
+    }
+    const textValues = [args[3] && !args[3].startsWith("--") ? args[3] : undefined, parseOption("--text"), parseOption("--text-file")].filter(
+      (value) => value !== undefined
+    );
+    if (textValues.length !== 1) {
+      throw cliError("browser fill 需要且只能通过位置参数、--text、--text-file 之一传入文本");
+    }
+    const textFile = parseOption("--text-file");
+    return {
+      method: "browser.fill",
+      params: {
+        ...readSelectorParams(false),
+        selector,
+        text: textFile ? readFileSync(resolve(textFile), "utf8") : textValues[0],
+        ...(parseOption("--wait") ? { wait: parseOption("--wait") } : {}),
+        ...(readTimeout() ? { timeoutMs: readTimeout() } : {})
+      }
+    };
+  }
+
+  if (browserCommand === "eval" || browserCommand === "eval-file") {
+    const script = browserCommand === "eval-file" ? readFileSync(resolve(args[2] ?? ""), "utf8") : args[2];
+    if (!script) {
+      throw cliError(`browser ${browserCommand} 需要 script`);
+    }
+    return {
+      method: "browser.eval",
+      params: {
+        ...readSelectorParams(false),
+        script,
+        ...(readTimeout() ? { timeoutMs: readTimeout() } : {})
+      }
+    };
+  }
+
+  if (browserCommand === "snapshot") {
+    return {
+      method: "browser.snapshot",
+      params: {
+        ...readSelectorParams(false),
+        ...(parseOption("--selector") ? { selector: parseOption("--selector") } : {}),
+        format: jsonOutput ? "json" : "text",
+        ...(readTimeout() ? { timeoutMs: readTimeout() } : {})
+      }
+    };
+  }
+
+  if (browserCommand === "screenshot") {
+    const outputPath = parseOption("--out");
+    return {
+      method: "browser.screenshot",
+      params: {
+        ...readSelectorParams(false),
+        ...(outputPath ? { path: isAbsolute(outputPath) ? outputPath : resolve(outputPath) } : {}),
+        ...(parseOption("--format") ? { format: parseOption("--format") } : {}),
+        ...(parseOption("--selector") ? { selector: parseOption("--selector") } : {}),
+        ...(hasFlag("--full-page") ? { fullPage: true } : {}),
+        ...(readTimeout() ? { timeoutMs: readTimeout() } : {})
+      }
+    };
+  }
+
+  throw cliError(`未知 browser 命令：${browserCommand ?? ""}`);
 }
 
 function createRequest() {
@@ -48,7 +210,7 @@ function createRequest() {
   if (command === "send") {
     const text = args[1];
     if (typeof text !== "string") {
-      throw new Error("send 需要文本参数");
+      throw cliError("send 需要文本参数");
     }
 
     return { method: "surface.sendText", params: { text: text.replaceAll("\\n", "\n") } };
@@ -58,13 +220,17 @@ function createRequest() {
     const title = parseOption("--title");
     const body = parseOption("--body");
     if (!title) {
-      throw new Error("notify 需要 --title");
+      throw cliError("notify 需要 --title");
     }
 
     return { method: "status.notify", params: { title, body } };
   }
 
-  throw new Error(`未知命令：${command ?? ""}`);
+  if (command === "browser") {
+    return createBrowserRequest();
+  }
+
+  throw cliError(`未知命令：${command ?? ""}`);
 }
 
 function requestSocket(payload) {
@@ -80,7 +246,9 @@ function requestSocket(payload) {
 
     const timer = setTimeout(() => {
       socket.destroy();
-      reject(new Error(`连接 wmux socket 超时：${socketPath}`));
+      const error = new Error(`连接 wmux socket 超时：${socketPath}`);
+      error.cliExitCode = 3;
+      reject(error);
     }, 5000);
 
     socket.setEncoding("utf8");
@@ -104,23 +272,72 @@ function requestSocket(payload) {
         } else {
           const error = new Error(response.error?.message ?? "wmux socket 请求失败");
           error.code = response.error?.code;
+          error.details = response.error?.details;
+          error.cliExitCode = 1;
           reject(error);
         }
       } catch (error) {
+        error.cliExitCode = 4;
         reject(error);
       }
     });
     socket.on("error", (error) => {
       clearTimeout(timer);
+      error.cliExitCode = 3;
       reject(error);
     });
     socket.on("close", () => clearTimeout(timer));
   });
 }
 
+function printBrowserResult(result) {
+  const browserCommand = args[1];
+  const outPath = parseOption("--out");
+  if (browserCommand === "snapshot" && outPath && typeof result?.snapshot === "string") {
+    return writeFileAndPrint(outPath, result.snapshot);
+  }
+  if (browserCommand === "eval") {
+    console.log(typeof result?.value === "string" ? result.value : JSON.stringify(result?.value));
+    return;
+  }
+  if (browserCommand === "snapshot") {
+    console.log(typeof result?.snapshot === "string" ? result.snapshot : JSON.stringify(result?.snapshot, null, 2));
+    return;
+  }
+  if (browserCommand === "screenshot") {
+    if (result?.path) {
+      console.log(`screenshot ${result.path}`);
+    } else {
+      console.log(result?.base64 ?? "");
+    }
+    return;
+  }
+  if (browserCommand === "fill") {
+    console.log(`filled ${result?.selector ?? "selector"}`);
+    return;
+  }
+  if (browserCommand === "click") {
+    console.log(`clicked ${result?.selector ?? "selector"}`);
+    return;
+  }
+  console.log(result?.url ?? JSON.stringify(result));
+}
+
+function writeFileAndPrint(path, content) {
+  const outputPath = resolve(path);
+  mkdirSync(dirname(outputPath), { recursive: true });
+  writeFileSync(outputPath, content, "utf8");
+  console.log(outputPath);
+}
+
 function printResult(result) {
   if (jsonOutput) {
     console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  if (command === "browser") {
+    printBrowserResult(result);
     return;
   }
 
@@ -154,5 +371,5 @@ try {
 } catch (error) {
   printUsage();
   console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
+  process.exit(typeof error?.cliExitCode === "number" ? error.cliExitCode : 1);
 }

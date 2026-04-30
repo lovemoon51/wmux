@@ -1,7 +1,8 @@
 import { _electron as electron } from "playwright";
 import electronPath from "electron";
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -9,9 +10,74 @@ const execFileAsync = promisify(execFile);
 const logPath = "output/playwright/terminal-smoke.log";
 const smokeUserDataPath = resolve("output/playwright/wmux-smoke-user-data");
 const smokeSocketPath = process.platform === "win32" ? "\\\\.\\pipe\\wmux-smoke" : resolve("output/playwright/wmux-smoke.sock");
+const projectConfigPath = resolve("wmux.json");
+const projectConfigBackupPath = resolve("output/playwright/wmux-json.backup");
+const hadProjectConfig = existsSync(projectConfigPath);
+const originalProjectConfig = hadProjectConfig ? readFileSync(projectConfigPath, "utf8") : "";
 rmSync(smokeUserDataPath, { force: true, recursive: true });
 mkdirSync(smokeUserDataPath, { recursive: true });
+mkdirSync(resolve("output/playwright"), { recursive: true });
 writeFileSync(logPath, "");
+if (hadProjectConfig) {
+  writeFileSync(projectConfigBackupPath, originalProjectConfig, "utf8");
+}
+writeFileSync(
+  projectConfigPath,
+  `${JSON.stringify(
+    {
+      commands: [
+        {
+          name: "Run Smoke Marker",
+          description: "向当前终端写入 smoke 标记",
+          keywords: ["smoke", "marker"],
+          command: "Write-Output WMUX_COMMAND_SMOKE"
+        },
+        {
+          name: "Open Dev Layout",
+          description: "创建包含终端和浏览器的工作区",
+          keywords: ["layout", "dev"],
+          workspace: {
+            name: "Command Layout Smoke",
+            cwd: ".",
+            layout: {
+              direction: "horizontal",
+              split: 0.55,
+              children: [
+                {
+                  pane: {
+                    surfaces: [
+                      {
+                        type: "terminal",
+                        name: "Layout Terminal",
+                        command: "Write-Output WMUX_LAYOUT_TERMINAL",
+                        focus: true
+                      }
+                    ]
+                  }
+                },
+                {
+                  pane: {
+                    surfaces: [
+                      {
+                        type: "browser",
+                        name: "Layout Browser",
+                        url: "data:text/html,<title>WMUX Layout</title><h1>WMUX_LAYOUT_BROWSER</h1>"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    null,
+    2
+  )}\n`,
+  "utf8"
+);
+
 
 function log(message) {
   console.log(message);
@@ -105,15 +171,6 @@ async function runCliSocketSmoke(window) {
     timeout: 15_000
   });
   log("ok wmux notify");
-}
-
-async function closeSurface(window, name) {
-  log(`close ${name}`);
-  await window.getByLabel(`Close ${name}`).click();
-  await window.waitForFunction((text) => !document.body.textContent?.includes(text), name, {
-    timeout: 15_000
-  });
-  log(`ok close ${name}`);
 }
 
 async function runWorkspaceCrud(window) {
@@ -328,6 +385,49 @@ async function runBrowserCrud(window) {
   log("ok browser crud");
 }
 
+async function runCommandPaletteSmoke(window) {
+  log("command palette");
+
+  await window.getByRole("button", { name: "Command" }).click();
+  await window.getByLabel("Command palette").waitFor({ timeout: 15_000 });
+  await window.getByText("2 个项目命令").waitFor({ timeout: 15_000 });
+  log("ok project wmux config");
+
+  await window.getByLabel("Command search").fill("layout");
+  await window.keyboard.press("Escape");
+  await window.getByLabel("Command palette").waitFor({ state: "detached", timeout: 15_000 });
+
+  await window.getByRole("button", { name: "Command" }).click();
+  await window.getByLabel("Command search").fill("run smoke");
+  await window.keyboard.press("ArrowDown");
+  await window.keyboard.press("ArrowUp");
+  await window.keyboard.press("Enter");
+  await window.getByLabel("Command palette").waitFor({ state: "detached", timeout: 15_000 });
+  log("ok command palette keyboard");
+  await window.waitForFunction(() => document.body.textContent?.includes("WMUX_COMMAND_SMOKE"), null, {
+    timeout: 15_000
+  });
+  log("ok simple command");
+
+  await window.getByRole("button", { name: "Command" }).click();
+  await window.getByLabel("Command search").fill("dev layout");
+  await window.keyboard.press("Enter");
+  await window.getByRole("heading", { name: "Command Layout Smoke" }).waitFor({ timeout: 15_000 });
+  await window.waitForFunction(() => document.querySelectorAll(".pane").length >= 2, null, { timeout: 15_000 });
+  await window.waitForFunction(
+    () => Array.from(document.querySelectorAll("webview")).some((webview) => webview.getURL?.().includes("WMUX_LAYOUT_BROWSER")),
+    null,
+    { timeout: 15_000 }
+  );
+  await window.waitForFunction(() => document.body.textContent?.includes("WMUX_LAYOUT_TERMINAL"), null, {
+    timeout: 15_000
+  });
+  log("ok workspace command layout");
+
+  await window.getByLabel("Open workspace API Server").click();
+  await window.getByRole("heading", { name: "API Server" }).waitFor({ timeout: 15_000 });
+}
+
 async function expectEnabled(locator) {
   await locator.waitFor({ timeout: 15_000 });
   await locator.page().waitForFunction((element) => !element.disabled, await locator.elementHandle(), {
@@ -393,6 +493,7 @@ try {
   await runSplitCrud(window);
   await runBrowserCrud(window);
   await runCliSocketSmoke(window);
+  await runCommandPaletteSmoke(window);
 
   await runTerminalCommand(window, "pwd", "D:\\IdeaProject\\codex\\wmux");
   await runTerminalCommand(window, "ls package.json", "package.json");
@@ -513,6 +614,12 @@ try {
   if (app) {
     await Promise.race([app.close(), new Promise((resolve) => setTimeout(resolve, 3_000))]);
   }
+  if (hadProjectConfig) {
+    writeFileSync(projectConfigPath, originalProjectConfig, "utf8");
+  } else {
+    rmSync(projectConfigPath, { force: true });
+  }
+  rmSync(projectConfigBackupPath, { force: true });
 }
 
 process.exit(0);

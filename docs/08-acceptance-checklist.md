@@ -25,9 +25,9 @@
 
 ## 2. P1 验收
 
-- [ ] 可读取项目级 `wmux.json`。
-- [ ] command palette 可搜索并运行 custom command。
-- [ ] workspace command 可创建包含多个 pane/surface 的布局。
+- [x] 可读取项目级 `wmux.json`。
+- [x] command palette 可搜索并运行 custom command。
+- [x] workspace command 可创建包含多个 pane/surface 的布局。
 - [ ] sidebar 可显示 git branch。
 - [ ] sidebar 可显示监听端口。
 - [ ] browser automation 支持 navigate、click、fill、eval。
@@ -48,7 +48,7 @@
 - [x] Browser webview 和网页内容随 pane/window 尺寸变化自适应。
 - [x] Browser surface 分屏后保留当前 URL 和可见内容。
 - [x] Terminal 滚动条视觉与深色界面一致。
-- [ ] 命令面板结果可通过键盘完整操作。
+- [x] 命令面板结果可通过键盘完整操作。
 
 ## 4. 安全验收
 

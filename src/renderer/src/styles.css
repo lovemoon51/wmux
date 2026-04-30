@@ -897,6 +897,162 @@ kbd {
   padding: 0 10px;
 }
 
+.commandPaletteOverlay {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: start center;
+  background: rgba(4, 7, 12, 0.58);
+  padding-top: 9vh;
+}
+
+.commandPalette {
+  display: grid;
+  width: min(720px, calc(100vw - 48px));
+  max-height: min(620px, calc(100vh - 120px));
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: #151a21;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+}
+
+.commandPaletteHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 13px 14px;
+  color: var(--text-secondary);
+}
+
+.commandPaletteHeader input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 15px;
+}
+
+.commandPaletteHeader input::placeholder {
+  color: var(--text-muted);
+}
+
+.commandPaletteStatus {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #202631;
+  padding: 8px 14px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.commandPaletteError {
+  overflow: hidden;
+  color: var(--danger);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commandPaletteList {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.commandPaletteItem {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 58px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.commandPaletteItemActive,
+.commandPaletteItem:hover {
+  border-color: #385064;
+  background: #202833;
+}
+
+.commandPaletteItemIcon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  color: var(--accent);
+}
+
+.commandPaletteItemMain {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.commandPaletteItemTitle {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commandPaletteItemDescription {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commandPaletteItemMeta {
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.commandPaletteEmpty {
+  padding: 28px 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+@media (max-width: 1280px) {
+  .titleIdentity p {
+    max-width: 320px;
+  }
+
+  .titleActions {
+    gap: 5px;
+  }
+
+  .toolbarButton,
+  .commandButton,
+  .shellSelectLabel {
+    padding: 0 8px;
+  }
+}
+
 @media (max-width: 1120px) {
   .appShell {
     grid-template-columns: 238px minmax(0, 1fr);

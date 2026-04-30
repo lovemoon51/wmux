@@ -113,6 +113,7 @@
 
 目标：达到 cmux browser API 的核心子集。
 
+- P0 规格先行：[Browser Automation CLI/socket 规格设计](09-browser-automation-cli-socket-spec.md)。
 - identify/open/navigate/url。
 - wait selector/text/load-state。
 - click/fill/type/press。
