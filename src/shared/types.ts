@@ -80,6 +80,7 @@ export type SocketRpcMethod =
   | "system.identify"
   | "system.capabilities"
   | "workspace.list"
+  | "surface.list"
   | "surface.sendText"
   | "surface.sendKey"
   | "status.notify"
@@ -169,6 +170,22 @@ export type ClearStatusParams = {
 
 export type StatusListParams = {
   workspaceId?: string;
+};
+
+export type SurfaceListParams = {
+  workspaceId?: string;
+};
+
+export type SurfaceSummary = {
+  surfaceId: string;
+  type: SurfaceType;
+  workspaceId: string;
+  workspaceName: string;
+  paneId: string;
+  active: boolean;
+  name: string;
+  status: WorkspaceStatus;
+  subtitle?: string;
 };
 
 export type BrowserRpcMethod =

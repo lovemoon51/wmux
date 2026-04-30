@@ -59,6 +59,8 @@ import type {
   SocketSecuritySettings,
   StatusListParams,
   Surface,
+  SurfaceListParams,
+  SurfaceSummary,
   WmuxCommandConfig,
   WmuxLayoutConfig,
   WmuxProjectConfigResult,
@@ -762,6 +764,7 @@ const socketCapabilities: SocketRpcMethod[] = [
   "system.identify",
   "system.capabilities",
   "workspace.list",
+  "surface.list",
   "surface.sendText",
   "surface.sendKey",
   "status.notify",
@@ -1440,6 +1443,28 @@ function createWorkspaceSummaries(workspaces: Workspace[], activeWorkspaceId: st
   });
 }
 
+function createSurfaceSummaries(workspaces: Workspace[], activeWorkspaceId: string, workspaceId?: string): SurfaceSummary[] {
+  const targetWorkspaces = workspaceId ? workspaces.filter((workspace) => workspace.id === workspaceId) : workspaces;
+  return targetWorkspaces.flatMap((workspace) =>
+    Object.values(workspace.panes).flatMap((pane) =>
+      pane.surfaceIds
+        .map((surfaceId) => workspace.surfaces[surfaceId])
+        .filter((surface): surface is Surface => Boolean(surface))
+        .map((surface) => ({
+          surfaceId: surface.id,
+          type: surface.type,
+          workspaceId: workspace.id,
+          workspaceName: workspace.name,
+          paneId: pane.id,
+          active: workspace.id === activeWorkspaceId && workspace.activePaneId === pane.id && pane.activeSurfaceId === surface.id,
+          name: surface.name,
+          status: surface.status,
+          subtitle: surface.subtitle
+        }))
+    )
+  );
+}
+
 function shouldApplyWorkspaceInspection(workspace: Workspace, inspection: WorkspaceInspection): boolean {
   const nextBranch = inspection.branch;
   const nextPorts = inspection.ports;
@@ -1873,6 +1898,25 @@ export function App(): ReactElement {
         window.wmux?.socket.respond(
           createSocketSuccessResponse(request.id, {
             workspaces: createWorkspaceSummaries(currentWorkspaces, currentActiveWorkspaceId)
+          })
+        );
+        return;
+      }
+
+      if (request.method === "surface.list") {
+        const params = (request.params ?? {}) as Partial<SurfaceListParams>;
+        if (params.workspaceId && !currentWorkspaces.some((workspace) => workspace.id === params.workspaceId)) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "NOT_FOUND", "找不到 workspace", {
+              workspaceId: params.workspaceId
+            })
+          );
+          return;
+        }
+
+        window.wmux?.socket.respond(
+          createSocketSuccessResponse(request.id, {
+            surfaces: createSurfaceSummaries(currentWorkspaces, currentActiveWorkspaceId, params.workspaceId)
           })
         );
         return;

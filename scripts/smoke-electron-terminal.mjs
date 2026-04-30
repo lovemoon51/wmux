@@ -334,7 +334,34 @@ async function navigateActiveBrowser(activePane, url) {
   await address.evaluate((input) => {
     input.form?.requestSubmit();
   });
-  await address.waitFor({ timeout: 15_000 });
+  await activePane.locator("webview").evaluate(
+    (webview, targetUrl) =>
+      new Promise((resolve, reject) => {
+        const currentUrl = webview.getURL?.();
+        if (currentUrl === targetUrl) {
+          resolve(currentUrl);
+          return;
+        }
+        const timer = window.setTimeout(() => {
+          cleanup();
+          reject(new Error(`browser did not navigate to ${targetUrl}`));
+        }, 15_000);
+        const cleanup = () => {
+          window.clearTimeout(timer);
+          webview.removeEventListener("did-navigate", handleNavigate);
+          webview.removeEventListener("did-finish-load", handleNavigate);
+        };
+        const handleNavigate = () => {
+          if (webview.getURL?.() === targetUrl) {
+            cleanup();
+            resolve(targetUrl);
+          }
+        };
+        webview.addEventListener("did-navigate", handleNavigate);
+        webview.addEventListener("did-finish-load", handleNavigate);
+      }),
+    url
+  );
 }
 
 function activeBrowserUrlMatches(targetUrl) {
@@ -425,6 +452,7 @@ async function runCliSocketSmoke(window) {
   for (const method of [
     "system.identify",
     "system.capabilities",
+    "surface.list",
     "surface.sendKey",
     "status.clear",
     "status.list",
@@ -441,6 +469,17 @@ async function runCliSocketSmoke(window) {
     throw new Error(`wmux list-workspaces did not include API Server: ${workspaceOutput}`);
   }
   log("ok wmux list-workspaces");
+
+  const surfaceOutput = await runCliCommand(["surface", "list"]);
+  if (!surfaceOutput.includes("surface-agent") || !surfaceOutput.includes("terminal") || !surfaceOutput.includes("API Server")) {
+    throw new Error(`wmux surface list did not include API Server terminal surfaces: ${surfaceOutput}`);
+  }
+  const surfaceJsonOutput = await runCliCommand(["surface", "list", "--json"]);
+  const surfaceList = JSON.parse(surfaceJsonOutput);
+  if (!surfaceList.surfaces?.some((surface) => surface.surfaceId === "surface-agent" && surface.active)) {
+    throw new Error(`wmux surface list --json did not include active surface-agent: ${surfaceJsonOutput}`);
+  }
+  log("ok wmux surface list");
 
   await window.locator('button.surfaceTab[aria-label="Codex Agent"]').click();
   await window.waitForSelector(".paneActive .surfaceBodyFrameActive .terminalHost .xterm textarea", {

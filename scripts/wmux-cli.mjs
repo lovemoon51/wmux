@@ -26,6 +26,7 @@ function printUsage() {
   wmux identify [--json]
   wmux capabilities [--json]
   wmux list-workspaces [--json]
+  wmux surface list [--workspace <id>] [--json]
   wmux send <text> [--json]
   wmux send-key <key> [--surface <id>] [--json]
   wmux notify --title <title> [--body <body>] [--json]
@@ -245,6 +246,20 @@ function createRequest() {
 
   if (command === "list-workspaces") {
     return { method: "workspace.list", params: {} };
+  }
+
+  if (command === "surface") {
+    const surfaceCommand = args[1];
+    if (surfaceCommand !== "list") {
+      throw cliError(`未知 surface 命令：${surfaceCommand ?? ""}`);
+    }
+
+    return {
+      method: "surface.list",
+      params: {
+        ...(parseOption("--workspace") ? { workspaceId: parseOption("--workspace") } : {})
+      }
+    };
   }
 
   if (command === "send") {
@@ -486,6 +501,17 @@ function printResult(result) {
     for (const workspace of result?.workspaces ?? []) {
       const activePrefix = workspace.active ? "*" : " ";
       console.log(`${activePrefix} ${workspace.name}\t${workspace.status}\t${workspace.cwd}`);
+    }
+    return;
+  }
+
+  if (command === "surface") {
+    for (const surface of result?.surfaces ?? []) {
+      const activePrefix = surface.active ? "*" : " ";
+      const subtitle = surface.subtitle ? `\t${surface.subtitle}` : "";
+      console.log(
+        `${activePrefix} ${surface.surfaceId}\t${surface.type}\t${surface.workspaceId}\t${surface.workspaceName}\t${surface.paneId}\t${surface.name}\t${surface.status}${subtitle}`
+      );
     }
     return;
   }

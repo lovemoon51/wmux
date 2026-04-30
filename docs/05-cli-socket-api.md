@@ -63,7 +63,8 @@ wmux rename-workspace --workspace workspace:1 --name "API"
 ### Surface
 
 ```bash
-wmux list-surfaces
+wmux surface list
+wmux surface list --workspace workspace:1
 wmux new-terminal --name "Tests" --cwd .
 wmux new-browser --url http://localhost:3000 --name Preview
 wmux split right
