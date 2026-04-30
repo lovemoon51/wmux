@@ -62,7 +62,7 @@
 
 达到 80%：
 
-- [ ] workspace/sidebar/split/surface/terminal/browser 全部可用。
+- [x] workspace/sidebar/split/surface/terminal/browser 全部可用。
 - [x] CLI/socket 可控制基本 UI 和 terminal。
 - [x] session restore 可恢复布局。
 
@@ -73,3 +73,8 @@
 - [ ] agent 通知和侧栏状态足够可靠。
 - [ ] terminal 体验接近日常主力终端。
 - [ ] 快捷键和命令面板能覆盖主要工作流。
+
+## 6. Smoke 覆盖依据
+
+- `npm run smoke:terminal` 覆盖 workspace CRUD、sidebar 状态、split CRUD、surface tab、terminal 输入/resize、browser CRUD、拖拽分屏、session restore、command palette、快捷键和性能 smoke。
+- `npm run smoke:browser` 覆盖 socket 安全模式、terminal 链接内置 browser、browser automation navigate/list/snapshot/fill/click/eval/screenshot、ambiguous target 和写文件路径校验。
