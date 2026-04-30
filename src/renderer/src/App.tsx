@@ -1476,6 +1476,7 @@ export function App(): ReactElement {
   const [trustedCommandConfigPath, setTrustedCommandConfigPath] = useState<string | null>(null);
   const [pendingCommandConfirmation, setPendingCommandConfirmation] = useState<WmuxCommandConfig | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [securitySettings, setSecuritySettings] = useState<SocketSecuritySettings | null>(null);
   const [securityModeDraft, setSecurityModeDraft] = useState<SocketSecurityMode>("wmuxOnly");
 
@@ -2489,9 +2490,17 @@ export function App(): ReactElement {
         onClose={handleCloseWorkspace}
         onOpenCommandPalette={openCommandPalette}
         settingsOpen={settingsOpen}
+        notificationsOpen={notificationsOpen}
         securityModeDraft={securityModeDraft}
         securitySettings={securitySettings}
-        onToggleSettings={() => setSettingsOpen((isOpen) => !isOpen)}
+        onToggleNotifications={() => {
+          setNotificationsOpen((isOpen) => !isOpen);
+          setSettingsOpen(false);
+        }}
+        onToggleSettings={() => {
+          setSettingsOpen((isOpen) => !isOpen);
+          setNotificationsOpen(false);
+        }}
         onSecurityModeDraftChange={setSecurityModeDraft}
         onSaveSecurityMode={handleSaveSecurityMode}
       />
@@ -2730,8 +2739,10 @@ function WorkspaceSidebar({
   onClose,
   onOpenCommandPalette,
   settingsOpen,
+  notificationsOpen,
   securityModeDraft,
   securitySettings,
+  onToggleNotifications,
   onToggleSettings,
   onSecurityModeDraftChange,
   onSaveSecurityMode
@@ -2749,12 +2760,16 @@ function WorkspaceSidebar({
   onClose: (id: string) => void;
   onOpenCommandPalette: () => void;
   settingsOpen: boolean;
+  notificationsOpen: boolean;
   securityModeDraft: SocketSecurityMode;
   securitySettings: SocketSecuritySettings | null;
+  onToggleNotifications: () => void;
   onToggleSettings: () => void;
   onSecurityModeDraftChange: (mode: SocketSecurityMode) => void;
   onSaveSecurityMode: () => void;
 }): ReactElement {
+  const notificationItems = workspaces.filter((workspace) => Boolean(workspace.notice));
+
   return (
     <aside className="sidebar">
       <div className="brandRow">
@@ -2905,10 +2920,41 @@ function WorkspaceSidebar({
       </div>
 
       <div className="sidebarFooter">
-        <button className="utilityButton" type="button">
+        <button
+          className="utilityButton"
+          type="button"
+          aria-expanded={notificationsOpen}
+          onClick={onToggleNotifications}
+        >
           <Bell size={15} />
           <span>Notifications</span>
+          <span className="utilityCount">{notificationItems.length}</span>
         </button>
+        {notificationsOpen && (
+          <div className="notificationPanel" aria-label="Notifications panel">
+            {notificationItems.length ? (
+              notificationItems.map((workspace) => (
+                <button
+                  className="notificationItem"
+                  type="button"
+                  key={workspace.id}
+                  onClick={() => onSelect(workspace.id)}
+                >
+                  <span className={`statusRing ${statusClass[workspace.status]}`} />
+                  <span className="notificationMain">
+                    <span className="notificationTitleRow">
+                      <span className="notificationWorkspace">{workspace.name}</span>
+                      <span className="notificationStatus">{statusLabels[workspace.status]}</span>
+                    </span>
+                    <span className="notificationText">{workspace.notice}</span>
+                  </span>
+                </button>
+              ))
+            ) : (
+              <div className="notificationEmpty">No workspace notifications</div>
+            )}
+          </div>
+        )}
         <button className="utilityButton" type="button" aria-expanded={settingsOpen} onClick={onToggleSettings}>
           <Settings size={15} />
           <span>Settings</span>

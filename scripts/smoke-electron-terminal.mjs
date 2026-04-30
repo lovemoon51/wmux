@@ -166,8 +166,11 @@ async function getReadyWindow(app) {
 async function runWorkspaceInspectionSmoke(window, expectedPort) {
   log("workspace inspection");
   const apiWorkspaceItem = window.locator(".workspaceItem").filter({ hasText: "API Server" }).first();
-  await apiWorkspaceItem.getByText(`:${expectedPort}`).waitFor({ timeout: 15_000 });
+  await apiWorkspaceItem.getByText(/:\d+/).waitFor({ timeout: 15_000 });
   await apiWorkspaceItem.getByText("main").waitFor({ timeout: 15_000 });
+  await window.waitForFunction((port) => document.body.textContent?.includes(`:${port}`), expectedPort, {
+    timeout: 15_000
+  });
   log("ok workspace inspection");
 }
 
@@ -430,6 +433,12 @@ async function runCliSocketSmoke(window) {
   });
   log("ok wmux send-key");
 
+  await window.getByRole("button", { name: /Notifications/ }).click();
+  await window.getByLabel("Notifications panel").waitFor({ timeout: 15_000 });
+  await window.getByLabel("Notifications panel").getByText("API Server").waitFor({ timeout: 15_000 });
+  await window.getByLabel("Notifications panel").getByText("uvicorn ready on 8787").waitFor({ timeout: 15_000 });
+  log("ok notifications panel initial state");
+
   const notifyOutput = await runCliCommand([
     "notify",
     "--title",
@@ -446,6 +455,9 @@ async function runCliSocketSmoke(window) {
   const apiWorkspaceItem = window.locator(".workspaceItem").filter({ hasText: "API Server" }).first();
   await apiWorkspaceItem.getByText("Needs input").waitFor({ timeout: 15_000 });
   await apiWorkspaceItem.getByText("WMUX_CLI_NOTIFY: socket smoke").waitFor({ timeout: 15_000 });
+  await window.getByLabel("Notifications panel").getByText("WMUX_CLI_NOTIFY: socket smoke").waitFor({ timeout: 15_000 });
+  await window.getByRole("button", { name: /Notifications/ }).click();
+  await window.getByLabel("Notifications panel").waitFor({ state: "detached", timeout: 15_000 });
   log("ok wmux notify");
 }
 
@@ -537,8 +549,9 @@ async function runBrowserCrud(window) {
   log("browser crud");
   await window.getByLabel("Open workspace API Server").click();
   await window.getByRole("heading", { name: "API Server" }).waitFor({ timeout: 15_000 });
-  await window.getByRole("button", { name: "Browser" }).click();
-  const activePane = window.locator(".paneActive");
+  const titleBar = window.locator(".titleBar");
+  await titleBar.getByRole("button", { name: "Browser", exact: true }).click();
+  const activePane = window.locator(".paneActive").first();
   const browserTab = window.locator(".paneActive button.surfaceTab").filter({ hasText: /Browser/ }).last();
   await browserTab.waitFor({ timeout: 15_000 });
   await browserTab.click();
@@ -547,6 +560,8 @@ async function runBrowserCrud(window) {
   const firstUrl = "data:text/html,<title>WMUX Browser One</title><h1>WMUX_BROWSER_ONE</h1>";
   const secondUrl = "data:text/html,<title>WMUX Browser Two</title><h1>WMUX_BROWSER_TWO</h1>";
   const address = activePane.locator(".surfaceBodyFrameActive").getByLabel("Browser address");
+  await address.waitFor({ timeout: 15_000 });
+  await address.click();
 
   await address.fill(firstUrl);
   await address.press("Enter");
