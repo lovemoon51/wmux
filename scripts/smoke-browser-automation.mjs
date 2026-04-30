@@ -286,6 +286,23 @@ try {
   }
   log("ok browser screenshot file");
 
+  const missingScreenshotPath = await runCli(["browser", "screenshot", "--surface", navigate.surfaceId, "--out", "--json"], {
+    allowFailure: true
+  });
+  if (missingScreenshotPath.code !== 2 || !missingScreenshotPath.stderr.includes("--out 需要明确文件路径")) {
+    throw new Error(`screenshot --out should require an explicit path: ${JSON.stringify(missingScreenshotPath)}`);
+  }
+  log("ok browser screenshot requires explicit path");
+
+  const mixedScreenshotOutputModes = await runCli(
+    ["browser", "screenshot", "--surface", navigate.surfaceId, "--out", screenshotPath, "--base64"],
+    { allowFailure: true }
+  );
+  if (mixedScreenshotOutputModes.code !== 2 || !mixedScreenshotOutputModes.stderr.includes("不能同时使用 --out 和 --base64")) {
+    throw new Error(`screenshot output modes should be exclusive: ${JSON.stringify(mixedScreenshotOutputModes)}`);
+  }
+  log("ok browser screenshot output mode conflict");
+
   const screenshotBase64 = parseJson(
     (await runCli(["browser", "screenshot", "--surface", navigate.surfaceId, "--base64", "--json"])).stdout
   );

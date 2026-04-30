@@ -56,7 +56,7 @@
 - [x] `allowAll` 模式有明确警告。
 - [ ] custom command 首次运行需确认或信任目录。
 - [x] socket token 不写入日志。
-- [ ] Browser automation 写文件操作需要明确路径。
+- [x] Browser automation 写文件操作需要明确路径。
 
 ## 5. 与 cmux 能力对齐度
 

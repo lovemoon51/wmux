@@ -54,6 +54,19 @@ function parseOption(name) {
   return args[index + 1];
 }
 
+function readOutputPath() {
+  if (!hasFlag("--out")) {
+    return undefined;
+  }
+
+  const outputPath = parseOption("--out");
+  if (!outputPath || outputPath.startsWith("--")) {
+    throw cliError("--out 需要明确文件路径");
+  }
+
+  return outputPath;
+}
+
 function hasFlag(name) {
   return args.includes(name);
 }
@@ -182,6 +195,7 @@ function createBrowserRequest() {
   }
 
   if (browserCommand === "snapshot") {
+    readOutputPath();
     return {
       method: "browser.snapshot",
       params: {
@@ -194,7 +208,10 @@ function createBrowserRequest() {
   }
 
   if (browserCommand === "screenshot") {
-    const outputPath = parseOption("--out");
+    const outputPath = readOutputPath();
+    if (outputPath && hasFlag("--base64")) {
+      throw cliError("browser screenshot 不能同时使用 --out 和 --base64");
+    }
     return {
       method: "browser.screenshot",
       params: {
@@ -331,7 +348,7 @@ function requestSocket(payload) {
 
 function printBrowserResult(result) {
   const browserCommand = args[1];
-  const outPath = parseOption("--out");
+  const outPath = readOutputPath();
   if (browserCommand === "list") {
     for (const browser of result?.browsers ?? []) {
       const activePrefix = browser.active ? "*" : " ";
