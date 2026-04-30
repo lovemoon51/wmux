@@ -259,6 +259,17 @@ try {
   }
   log("ok browser snapshot");
 
+  const mainSnapshot = parseJson(
+    (await runCli(["browser", "snapshot", "--surface", navigate.surfaceId, "--selector", "main", "--json"])).stdout
+  );
+  if (mainSnapshot.snapshot?.tag !== "main" || JSON.stringify(mainSnapshot.snapshot).includes("title")) {
+    throw new Error(`selector snapshot should be rooted at main: ${JSON.stringify(mainSnapshot)}`);
+  }
+  if (!JSON.stringify(mainSnapshot.snapshot).includes("WMUX_BROWSER_AUTOMATION")) {
+    throw new Error(`selector snapshot did not include expected main content: ${JSON.stringify(mainSnapshot)}`);
+  }
+  log("ok browser selector snapshot");
+
   await runCli(["browser", "fill", "#name", "wmux", "--surface", navigate.surfaceId]);
   const filledValue = parseJson(
     (await runCli(["browser", "eval", "document.querySelector('#name').value", "--surface", navigate.surfaceId, "--json"])).stdout
@@ -276,6 +287,29 @@ try {
     throw new Error(`click did not update dataset: ${JSON.stringify(clickedValue)}`);
   }
   log("ok browser click");
+
+  const stateValue = parseJson(
+    (
+      await runCli([
+        "browser",
+        "eval",
+        "({ title: document.title, url: location.href, input: document.querySelector('#name')?.value, clicked: document.body.dataset.clicked, result: document.querySelector('#result')?.textContent })",
+        "--surface",
+        navigate.surfaceId,
+        "--json"
+      ])
+    ).stdout
+  );
+  if (
+    stateValue.value?.title !== "WMUX Browser Automation Smoke" ||
+    !stateValue.value?.url?.startsWith("data:text/html") ||
+    stateValue.value?.input !== "wmux" ||
+    stateValue.value?.clicked !== "wmux" ||
+    stateValue.value?.result !== "clicked: wmux"
+  ) {
+    throw new Error(`eval state inspection returned unexpected value: ${JSON.stringify(stateValue)}`);
+  }
+  log("ok browser state inspection");
   log("ok browser eval");
 
   const screenshot = parseJson(
