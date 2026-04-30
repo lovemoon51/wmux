@@ -82,6 +82,7 @@ export type SocketRpcMethod =
   | "workspace.list"
   | "workspace.select"
   | "workspace.close"
+  | "workspace.rename"
   | "surface.list"
   | "surface.focus"
   | "surface.sendText"
@@ -181,6 +182,11 @@ export type WorkspaceSelectParams = {
 
 export type WorkspaceCloseParams = {
   workspaceId: string;
+};
+
+export type WorkspaceRenameParams = {
+  workspaceId: string;
+  name: string;
 };
 
 export type SurfaceListParams = {

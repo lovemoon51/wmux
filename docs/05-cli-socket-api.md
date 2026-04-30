@@ -117,6 +117,7 @@ wmux browser errors list --surface surface:3
 | `workspace.create` | `{ name?, cwd?, layout? }` | workspace |
 | `workspace.select` | `{ workspaceId }` | selected workspace |
 | `workspace.close` | `{ workspaceId }` | closed workspace |
+| `workspace.rename` | `{ workspaceId, name }` | renamed workspace |
 | `surface.list` | `{ workspaceId? }` | surface list |
 | `surface.createTerminal` | `{ paneId?, name?, cwd?, command? }` | surface |
 | `surface.createBrowser` | `{ paneId?, name?, url? }` | surface |

@@ -316,8 +316,10 @@ async function runWorkspaceSwitchLatencySmoke(window) {
 
 async function runTerminalCommand(window, command, expectedText) {
   log(`run ${command}`);
-  await window.locator(".paneActive .surfaceBodyFrameActive .terminalHost").click();
-  await window.keyboard.type(command);
+  const textarea = window.locator(".paneActive .surfaceBodyFrameActive .terminalHost .xterm textarea");
+  await textarea.waitFor({ state: "attached", timeout: 15_000 });
+  await textarea.click();
+  await textarea.fill(command);
   await window.keyboard.press("Enter");
   await window.waitForFunction((text) => document.body.textContent?.includes(text), expectedText, {
     timeout: 15_000
@@ -381,6 +383,15 @@ function activeBrowserUrlMatches(targetUrl) {
   const activeBrowser = document.querySelector(".surfaceBodyFrameActive .browserSurface input[aria-label='Browser address']");
   const currentUrl = activeBrowser?.closest(".surfaceBodyFrameActive")?.querySelector("webview")?.getURL?.();
   return typeof currentUrl === "string" && (currentUrl === targetUrl || decodeURIComponent(currentUrl) === targetUrl);
+}
+
+function activeBrowserPane(window) {
+  return window
+    .locator(".pane")
+    .filter({
+      has: window.locator(".surfaceBodyFrameActive .browserSurface input[aria-label='Browser address']")
+    })
+    .first();
 }
 
 async function runEightTerminalSurfaceLatencySmoke(window) {
@@ -468,6 +479,7 @@ async function runCliSocketSmoke(window) {
     "system.capabilities",
     "workspace.select",
     "workspace.close",
+    "workspace.rename",
     "surface.list",
     "surface.focus",
     "surface.sendKey",
@@ -526,6 +538,33 @@ async function runCliSocketSmoke(window) {
   }
   await runCliCommand(["select-workspace", "--workspace", "workspace-api"]);
   log("ok wmux close-workspace");
+
+  await window.getByLabel("New workspace").click();
+  await renameWorkspace(window, await getActiveWorkspaceName(window), "CLI Rename Smoke");
+  const cliRenameWorkspaceOutput = await runCliCommand(["list-workspaces", "--json"]);
+  const cliRenameWorkspaceList = JSON.parse(cliRenameWorkspaceOutput);
+  const cliRenameWorkspace = cliRenameWorkspaceList.workspaces?.find((workspace) => workspace.name === "CLI Rename Smoke");
+  if (!cliRenameWorkspace?.id) {
+    throw new Error(`wmux list-workspaces did not include CLI Rename Smoke: ${cliRenameWorkspaceOutput}`);
+  }
+  const renameWorkspaceOutput = await runCliCommand([
+    "rename-workspace",
+    "--workspace",
+    cliRenameWorkspace.id,
+    "--name",
+    "CLI Renamed Smoke"
+  ]);
+  if (!renameWorkspaceOutput.includes("renamed CLI Renamed Smoke")) {
+    throw new Error(`wmux rename-workspace did not report renamed CLI Renamed Smoke: ${renameWorkspaceOutput}`);
+  }
+  const afterRenameWorkspaceOutput = await runCliCommand(["list-workspaces", "--json"]);
+  const afterRenameWorkspaceList = JSON.parse(afterRenameWorkspaceOutput);
+  if (!afterRenameWorkspaceList.workspaces?.some((workspace) => workspace.id === cliRenameWorkspace.id && workspace.name === "CLI Renamed Smoke")) {
+    throw new Error(`wmux rename-workspace did not update workspace name: ${afterRenameWorkspaceOutput}`);
+  }
+  await runCliCommand(["close-workspace", "--workspace", cliRenameWorkspace.id]);
+  await runCliCommand(["select-workspace", "--workspace", "workspace-api"]);
+  log("ok wmux rename-workspace");
 
   const surfaceOutput = await runCliCommand(["surface", "list"]);
   if (!surfaceOutput.includes("surface-agent") || !surfaceOutput.includes("terminal") || !surfaceOutput.includes("API Server")) {
@@ -757,9 +796,7 @@ async function runBrowserCrud(window) {
   const browserTab = window.locator(".pane button.surfaceTab").filter({ hasText: /Browser/ }).first();
   await browserTab.waitFor({ timeout: 15_000 });
   await browserTab.click();
-  const activePane = window.locator(".pane").filter({
-    has: window.locator(".surfaceBodyFrameActive .browserSurface input[aria-label='Browser address']")
-  }).first();
+  const activePane = activeBrowserPane(window);
   await activePane.waitFor({ timeout: 15_000 });
   await activePane.locator(".surfaceBodyFrameActive webview").waitFor({ timeout: 15_000 });
 
@@ -814,16 +851,17 @@ async function runBrowserCrud(window) {
   await window.waitForFunction(activeBrowserUrlMatches, secondUrl, { timeout: 15_000 });
   log("ok browser second url");
 
-  await activePane.getByLabel("Back").click();
+  await expectEnabled(activeBrowserPane(window).getByLabel("Back"));
+  await activeBrowserPane(window).getByLabel("Back").click();
   await window.waitForFunction(activeBrowserUrlMatches, firstUrl, { timeout: 15_000 });
   log("ok browser back");
 
-  await expectEnabled(activePane.getByLabel("Forward"));
-  await activePane.getByLabel("Forward").click();
+  await expectEnabled(activeBrowserPane(window).getByLabel("Forward"));
+  await activeBrowserPane(window).getByLabel("Forward").click();
   await window.waitForFunction(activeBrowserUrlMatches, secondUrl, { timeout: 15_000 });
   log("ok browser forward");
 
-  await activePane.getByLabel("Reload").click();
+  await activeBrowserPane(window).getByLabel("Reload").click();
   await window.waitForFunction(activeBrowserUrlMatches, secondUrl, { timeout: 15_000 });
   log("ok browser reload");
 

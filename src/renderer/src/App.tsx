@@ -69,6 +69,7 @@ import type {
   Workspace,
   WorkspaceCloseParams,
   WorkspaceInspection,
+  WorkspaceRenameParams,
   WorkspaceSelectParams,
   WorkspaceStatus,
   WorkspaceSummary
@@ -769,6 +770,7 @@ const socketCapabilities: SocketRpcMethod[] = [
   "workspace.list",
   "workspace.select",
   "workspace.close",
+  "workspace.rename",
   "surface.list",
   "surface.focus",
   "surface.sendText",
@@ -1988,6 +1990,48 @@ export function App(): ReactElement {
             workspaceId: closedWorkspace.id,
             workspaceName: closedWorkspace.name,
             activeWorkspaceId: fallbackWorkspace?.id
+          })
+        );
+        return;
+      }
+
+      if (request.method === "workspace.rename") {
+        const params = (request.params ?? {}) as Partial<WorkspaceRenameParams>;
+        if (typeof params.workspaceId !== "string" || !params.workspaceId.trim()) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "BAD_REQUEST", "workspace.rename 需要 workspaceId")
+          );
+          return;
+        }
+        if (typeof params.name !== "string" || !params.name.trim()) {
+          window.wmux?.socket.respond(createSocketErrorResponse(request.id, "BAD_REQUEST", "workspace.rename 需要 name"));
+          return;
+        }
+
+        const targetWorkspace = currentWorkspaces.find((workspace) => workspace.id === params.workspaceId);
+        if (!targetWorkspace) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "NOT_FOUND", "找不到 workspace", {
+              workspaceId: params.workspaceId
+            })
+          );
+          return;
+        }
+
+        const nextName = params.name.trim();
+        setWorkspaces((items) =>
+          items.map((workspace) => (workspace.id === targetWorkspace.id ? { ...workspace, name: nextName } : workspace))
+        );
+        if (editingWorkspaceIdRef.current === targetWorkspace.id) {
+          setEditingWorkspaceId(null);
+          setWorkspaceNameDraft("");
+        }
+
+        window.wmux?.socket.respond(
+          createSocketSuccessResponse(request.id, {
+            workspaceId: targetWorkspace.id,
+            workspaceName: nextName,
+            previousName: targetWorkspace.name
           })
         );
         return;

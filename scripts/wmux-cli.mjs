@@ -28,6 +28,7 @@ function printUsage() {
   wmux list-workspaces [--json]
   wmux select-workspace --workspace <id> [--json]
   wmux close-workspace --workspace <id> [--json]
+  wmux rename-workspace --workspace <id> --name <name> [--json]
   wmux surface list [--workspace <id>] [--json]
   wmux surface focus --surface <id> [--json]
   wmux send <text> [--json]
@@ -273,6 +274,24 @@ function createRequest() {
       method: "workspace.close",
       params: {
         workspaceId
+      }
+    };
+  }
+
+  if (command === "rename-workspace") {
+    const workspaceId = parseOption("--workspace");
+    const name = parseOption("--name");
+    if (!workspaceId || workspaceId.startsWith("--")) {
+      throw cliError("rename-workspace 需要 --workspace <id>");
+    }
+    if (!name || name.startsWith("--")) {
+      throw cliError("rename-workspace 需要 --name <name>");
+    }
+    return {
+      method: "workspace.rename",
+      params: {
+        workspaceId,
+        name
       }
     };
   }
@@ -555,6 +574,11 @@ function printResult(result) {
 
   if (command === "close-workspace") {
     console.log(`closed ${result?.workspaceName ?? result?.workspaceId ?? "workspace"}`);
+    return;
+  }
+
+  if (command === "rename-workspace") {
+    console.log(`renamed ${result?.workspaceName ?? result?.workspaceId ?? "workspace"}`);
     return;
   }
 
