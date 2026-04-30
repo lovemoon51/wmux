@@ -47,6 +47,50 @@ writeFileSync(
           command: "Write-Output WMUX_COMMAND_SMOKE"
         },
         {
+          name: "Open Confirm Layout",
+          description: "确认后重建已有工作区",
+          keywords: ["layout", "confirm"],
+          restart: "confirm",
+          workspace: {
+            name: "Command Confirm Smoke",
+            cwd: ".",
+            layout: {
+              pane: {
+                surfaces: [
+                  {
+                    type: "terminal",
+                    name: "Confirm Terminal",
+                    command: "Write-Output WMUX_CONFIRM_LAYOUT",
+                    focus: true
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          name: "Open Recreate Layout",
+          description: "直接重建已有工作区",
+          keywords: ["layout", "recreate"],
+          restart: "recreate",
+          workspace: {
+            name: "Command Recreate Smoke",
+            cwd: ".",
+            layout: {
+              pane: {
+                surfaces: [
+                  {
+                    type: "terminal",
+                    name: "Recreate Terminal",
+                    command: "Write-Output WMUX_RECREATE_LAYOUT",
+                    focus: true
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
           name: "Open Dev Layout",
           description: "创建包含终端和浏览器的工作区",
           keywords: ["layout", "dev"],
@@ -1094,7 +1138,7 @@ async function runCommandPaletteSmoke(window) {
 
   await window.getByRole("button", { name: "Command" }).click();
   await window.getByLabel("Command palette").waitFor({ timeout: 15_000 });
-  await window.getByText("2 个项目命令").waitFor({ timeout: 15_000 });
+  await window.getByText("4 个项目命令").waitFor({ timeout: 15_000 });
   log("ok project wmux config");
 
   const commandSearch = window.getByLabel("Command search");
@@ -1156,6 +1200,92 @@ async function runCommandPaletteSmoke(window) {
     timeout: 15_000
   });
   log("ok workspace command restart ignore");
+
+  await window.locator(".titleBar").getByRole("button", { name: "Command", exact: true }).click();
+  await commandSearch.fill("confirm layout");
+  await commandSearch.press("Enter");
+  await window.getByRole("heading", { name: "Command Confirm Smoke" }).waitFor({ timeout: 15_000 });
+  await window.waitForFunction(() => document.body.textContent?.includes("WMUX_CONFIRM_LAYOUT"), null, {
+    timeout: 15_000
+  });
+  const firstConfirmWorkspaceList = JSON.parse(await runCliCommand(["list-workspaces", "--json"]));
+  const firstConfirmWorkspace = firstConfirmWorkspaceList.workspaces?.find(
+    (workspace) => workspace.name === "Command Confirm Smoke"
+  );
+  if (!firstConfirmWorkspace?.id) {
+    throw new Error("Workspace command restart confirm did not create the initial workspace");
+  }
+  const workspaceCountBeforeRestartConfirm = await window.locator(".workspaceItem").count();
+  await window.locator(".titleBar").getByRole("button", { name: "Command", exact: true }).click();
+  await commandSearch.fill("confirm layout");
+  await commandSearch.press("Enter");
+  await window.getByLabel("Confirm project command").waitFor({ timeout: 15_000 });
+  await window.getByRole("button", { name: "Cancel" }).click();
+  await window.getByLabel("Confirm project command").waitFor({ state: "detached", timeout: 15_000 });
+  await window.waitForFunction(
+    (count) => document.querySelectorAll(".workspaceItem").length === count,
+    workspaceCountBeforeRestartConfirm,
+    { timeout: 15_000 }
+  );
+  const canceledConfirmWorkspaceList = JSON.parse(await runCliCommand(["list-workspaces", "--json"]));
+  const canceledConfirmWorkspace = canceledConfirmWorkspaceList.workspaces?.find(
+    (workspace) => workspace.name === "Command Confirm Smoke"
+  );
+  if (canceledConfirmWorkspace?.id !== firstConfirmWorkspace.id) {
+    throw new Error("Workspace command restart confirm recreated after cancel");
+  }
+  await window.locator(".titleBar").getByRole("button", { name: "Command", exact: true }).click();
+  await commandSearch.fill("confirm layout");
+  await commandSearch.press("Enter");
+  await window.getByLabel("Confirm project command").waitFor({ timeout: 15_000 });
+  await window.getByRole("button", { name: "Recreate workspace" }).click();
+  await window.getByLabel("Command palette").waitFor({ state: "detached", timeout: 15_000 });
+  await window.waitForFunction(
+    (count) => document.querySelectorAll(".workspaceItem").length === count,
+    workspaceCountBeforeRestartConfirm,
+    { timeout: 15_000 }
+  );
+  const recreatedConfirmWorkspaceList = JSON.parse(await runCliCommand(["list-workspaces", "--json"]));
+  const recreatedConfirmWorkspace = recreatedConfirmWorkspaceList.workspaces?.find(
+    (workspace) => workspace.name === "Command Confirm Smoke"
+  );
+  if (!recreatedConfirmWorkspace?.id || recreatedConfirmWorkspace.id === firstConfirmWorkspace.id) {
+    throw new Error("Workspace command restart confirm did not recreate after confirmation");
+  }
+  log("ok workspace command restart confirm");
+
+  await window.locator(".titleBar").getByRole("button", { name: "Command", exact: true }).click();
+  await commandSearch.fill("recreate layout");
+  await commandSearch.press("Enter");
+  await window.getByRole("heading", { name: "Command Recreate Smoke" }).waitFor({ timeout: 15_000 });
+  await window.waitForFunction(() => document.body.textContent?.includes("WMUX_RECREATE_LAYOUT"), null, {
+    timeout: 15_000
+  });
+  const firstRecreateWorkspaceList = JSON.parse(await runCliCommand(["list-workspaces", "--json"]));
+  const firstRecreateWorkspace = firstRecreateWorkspaceList.workspaces?.find(
+    (workspace) => workspace.name === "Command Recreate Smoke"
+  );
+  if (!firstRecreateWorkspace?.id) {
+    throw new Error("Workspace command restart recreate did not create the initial workspace");
+  }
+  const workspaceCountBeforeRestartRecreate = await window.locator(".workspaceItem").count();
+  await window.locator(".titleBar").getByRole("button", { name: "Command", exact: true }).click();
+  await commandSearch.fill("recreate layout");
+  await commandSearch.press("Enter");
+  await window.getByLabel("Command palette").waitFor({ state: "detached", timeout: 15_000 });
+  await window.waitForFunction(
+    (count) => document.querySelectorAll(".workspaceItem").length === count,
+    workspaceCountBeforeRestartRecreate,
+    { timeout: 15_000 }
+  );
+  const secondRecreateWorkspaceList = JSON.parse(await runCliCommand(["list-workspaces", "--json"]));
+  const secondRecreateWorkspace = secondRecreateWorkspaceList.workspaces?.find(
+    (workspace) => workspace.name === "Command Recreate Smoke"
+  );
+  if (!secondRecreateWorkspace?.id || secondRecreateWorkspace.id === firstRecreateWorkspace.id) {
+    throw new Error("Workspace command restart recreate did not replace the existing workspace");
+  }
+  log("ok workspace command restart recreate");
 
   await window.getByLabel("Open workspace API Server").click();
   await window.getByRole("heading", { name: "API Server" }).waitFor({ timeout: 15_000 });
@@ -1268,6 +1398,11 @@ async function runSessionRestoreSmoke(currentApp, window) {
     { timeout: 15_000 }
   );
   await restoredWindow.locator("button.surfaceTab").filter({ hasText: /Browser/ }).first().waitFor({ timeout: 15_000 });
+  await restoredWindow.locator("button.surfaceTab").filter({ hasText: /^Terminal$/ }).first().click();
+  await restoredWindow.waitForSelector(".paneActive .surfaceBodyFrameActive .terminalHost .xterm textarea", {
+    state: "attached",
+    timeout: 15_000
+  });
   log("ok session restore");
 
   return { app: restoredApp, window: restoredWindow };

@@ -131,6 +131,12 @@ type PendingTerminalCommand = {
   command: string;
 };
 
+type PendingProjectCommandConfirmation = {
+  command: WmuxCommandConfig;
+  reason: "trust" | "restart";
+  existingWorkspaceId?: string;
+};
+
 type BrowserSurfaceTarget = {
   workspaceId: string;
   paneId: string;
@@ -564,6 +570,13 @@ function resolveWorkspaceCwd(cwd?: string): string {
   }
 
   return cwd;
+}
+
+function getWorkspaceCommandIdentity(command: WmuxCommandConfig): { name: string; cwd: string } {
+  return {
+    name: command.workspace?.name?.trim() || command.name,
+    cwd: resolveWorkspaceCwd(command.workspace?.cwd)
+  };
 }
 
 function createConfiguredSurface(config: WmuxSurfaceConfig, fallbackName: string): Surface {
@@ -1554,7 +1567,8 @@ export function App(): ReactElement {
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [pendingTerminalCommands, setPendingTerminalCommands] = useState<PendingTerminalCommand[]>([]);
   const [trustedCommandConfigPath, setTrustedCommandConfigPath] = useState<string | null>(null);
-  const [pendingCommandConfirmation, setPendingCommandConfirmation] = useState<WmuxCommandConfig | null>(null);
+  const [pendingCommandConfirmation, setPendingCommandConfirmation] =
+    useState<PendingProjectCommandConfirmation | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [securitySettings, setSecuritySettings] = useState<SocketSecuritySettings | null>(null);
@@ -1841,12 +1855,35 @@ export function App(): ReactElement {
     setPendingTerminalCommands((items) => [...items, { surfaceId: surface.id, command: command.command ?? "" }]);
   };
 
+  const findExistingCommandWorkspace = (command: WmuxCommandConfig): Workspace | undefined => {
+    const identity = getWorkspaceCommandIdentity(command);
+    return workspaces.find((workspace) => workspace.name === identity.name && workspace.cwd === identity.cwd);
+  };
+
+  const buildAndAddWorkspaceCommand = (command: WmuxCommandConfig, replaceWorkspaceId?: string): void => {
+    const buildResult = createWorkspaceFromCommand(command);
+    setWorkspaces((currentWorkspaces) => {
+      if (!replaceWorkspaceId) {
+        return [...currentWorkspaces, buildResult.workspace];
+      }
+
+      const replaceIndex = currentWorkspaces.findIndex((workspace) => workspace.id === replaceWorkspaceId);
+      if (replaceIndex < 0) {
+        return [...currentWorkspaces, buildResult.workspace];
+      }
+
+      const nextWorkspaces = currentWorkspaces.filter((workspace) => workspace.id !== replaceWorkspaceId);
+      nextWorkspaces.splice(replaceIndex, 0, buildResult.workspace);
+      return nextWorkspaces;
+    });
+    setActiveWorkspaceId(buildResult.workspace.id);
+    setPendingTerminalCommands((items) => [...items, ...buildResult.terminalCommands]);
+  };
+
   const runWorkspaceCommand = (command: WmuxCommandConfig): void => {
-    if (command.restart === "ignore") {
-      const workspaceName = command.workspace?.name?.trim() || command.name;
-      const workspaceCwd = resolveWorkspaceCwd(command.workspace?.cwd);
-      const existingWorkspace = workspaces.find((workspace) => workspace.name === workspaceName && workspace.cwd === workspaceCwd);
-      if (existingWorkspace) {
+    const existingWorkspace = findExistingCommandWorkspace(command);
+    if (existingWorkspace) {
+      if (command.restart === "ignore") {
         setActiveWorkspaceId(existingWorkspace.id);
         setWorkspaces((currentWorkspaces) =>
           currentWorkspaces.map((workspace) =>
@@ -1860,12 +1897,20 @@ export function App(): ReactElement {
         );
         return;
       }
+
+      if (command.restart === "confirm") {
+        setActiveWorkspaceId(existingWorkspace.id);
+        setPendingCommandConfirmation({ command, reason: "restart", existingWorkspaceId: existingWorkspace.id });
+        return;
+      }
+
+      if (command.restart === "recreate") {
+        buildAndAddWorkspaceCommand(command, existingWorkspace.id);
+        return;
+      }
     }
 
-    const buildResult = createWorkspaceFromCommand(command);
-    setWorkspaces((currentWorkspaces) => [...currentWorkspaces, buildResult.workspace]);
-    setActiveWorkspaceId(buildResult.workspace.id);
-    setPendingTerminalCommands((items) => [...items, ...buildResult.terminalCommands]);
+    buildAndAddWorkspaceCommand(command);
   };
 
   const executeProjectCommand = (command: WmuxCommandConfig): void => {
@@ -1879,7 +1924,7 @@ export function App(): ReactElement {
   const runProjectCommand = (command: WmuxCommandConfig): void => {
     const configPath = projectConfig?.path;
     if (projectConfig?.found && configPath && trustedCommandConfigPath !== configPath) {
-      setPendingCommandConfirmation(command);
+      setPendingCommandConfirmation({ command, reason: "trust" });
       return;
     }
 
@@ -1888,15 +1933,19 @@ export function App(): ReactElement {
   };
 
   const confirmProjectCommand = (): void => {
-    const command = pendingCommandConfirmation;
-    if (!command) {
+    const confirmation = pendingCommandConfirmation;
+    if (!confirmation) {
       return;
     }
 
-    if (projectConfig?.path) {
+    if (confirmation.reason === "trust" && projectConfig?.path) {
       setTrustedCommandConfigPath(projectConfig.path);
     }
-    executeProjectCommand(command);
+    if (confirmation.reason === "restart") {
+      buildAndAddWorkspaceCommand(confirmation.command, confirmation.existingWorkspaceId);
+    } else {
+      executeProjectCommand(confirmation.command);
+    }
     setPendingCommandConfirmation(null);
     closeCommandPalette();
   };
@@ -3091,7 +3140,7 @@ export function App(): ReactElement {
         onSelectedIndexChange={setSelectedCommandIndex}
       />
       <ProjectCommandConfirmDialog
-        command={pendingCommandConfirmation}
+        confirmation={pendingCommandConfirmation}
         configPath={projectConfig?.path}
         onCancel={() => setPendingCommandConfirmation(null)}
         onConfirm={confirmProjectCommand}
@@ -3101,19 +3150,26 @@ export function App(): ReactElement {
 }
 
 function ProjectCommandConfirmDialog({
-  command,
+  confirmation,
   configPath,
   onCancel,
   onConfirm
 }: {
-  command: WmuxCommandConfig | null;
+  confirmation: PendingProjectCommandConfirmation | null;
   configPath?: string;
   onCancel: () => void;
   onConfirm: () => void;
 }): ReactElement | null {
-  if (!command) {
+  if (!confirmation) {
     return null;
   }
+
+  const isRestart = confirmation.reason === "restart";
+  const title = isRestart ? "Recreate workspace?" : "Run project command?";
+  const description = isRestart
+    ? `${confirmation.command.name} already has a matching workspace. Recreate it from wmux.json?`
+    : confirmation.command.name;
+  const actionLabel = isRestart ? "Recreate workspace" : "Run project command";
 
   return (
     <div className="confirmOverlay" role="presentation" onMouseDown={onCancel}>
@@ -3126,16 +3182,16 @@ function ProjectCommandConfirmDialog({
       >
         <div className="confirmDialogHeader">
           <Command size={18} />
-          <h2>Run project command?</h2>
+          <h2>{title}</h2>
         </div>
-        <p>{command.name}</p>
+        <p>{description}</p>
         <p className="confirmDialogMeta">{configPath ?? "wmux.json"}</p>
         <div className="confirmDialogActions">
           <button className="toolbarButton" type="button" onClick={onCancel}>
             Cancel
           </button>
           <button className="commandButton" type="button" onClick={onConfirm}>
-            Run project command
+            {actionLabel}
           </button>
         </div>
       </section>
