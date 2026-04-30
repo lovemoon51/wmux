@@ -41,7 +41,13 @@ export function TerminalSurface({
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const onOpenUrlRef = useRef(onOpenUrl);
+  const lastSelectionRef = useRef("");
   const sessionId = `${surface.id}:${shell}`;
+
+  useEffect(() => {
+    onOpenUrlRef.current = onOpenUrl;
+  }, [onOpenUrl]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -103,11 +109,45 @@ export function TerminalSurface({
       });
     };
 
-    const focusTerminal = (): void => terminal.focus();
+    const focusTerminal = (event: MouseEvent): void => {
+      if (event.button === 0) {
+        terminal.focus();
+      }
+    };
     host.addEventListener("mousedown", focusTerminal);
 
+    const selectionChangeDisposable = terminal.onSelectionChange(() => {
+      const selection = terminal.getSelection();
+      if (selection.trim()) {
+        lastSelectionRef.current = selection;
+      }
+    });
+
+    const handleTerminalContextMenu = (event: MouseEvent): void => {
+      const activeSelection = terminal.getSelection() || window.getSelection()?.toString() || "";
+      const selectionToCopy = activeSelection.trim() ? activeSelection : lastSelectionRef.current;
+
+      event.preventDefault();
+      event.stopPropagation();
+      if (selectionToCopy.trim()) {
+        lastSelectionRef.current = "";
+        window.wmux?.clipboard.writeText(selectionToCopy);
+        terminal.clearSelection();
+        terminal.focus();
+        return;
+      }
+
+      const text = window.wmux?.clipboard.readText() ?? "";
+      if (text) {
+        terminal.paste(text);
+      }
+      terminal.focus();
+    };
+    host.addEventListener("contextmenu", handleTerminalContextMenu, { capture: true });
+
     const handleTerminalClick = (event: MouseEvent): void => {
-      if (!onOpenUrl) {
+      const openUrl = onOpenUrlRef.current;
+      if (!openUrl) {
         return;
       }
 
@@ -132,7 +172,7 @@ export function TerminalSurface({
       }
 
       if (rowUrls.length === 1) {
-        onOpenUrl(rowUrls[0].url);
+        openUrl(rowUrls[0].url);
         return;
       }
 
@@ -144,7 +184,7 @@ export function TerminalSurface({
       );
 
       if (clickedUrl) {
-        onOpenUrl(clickedUrl.url);
+        openUrl(clickedUrl.url);
       }
     };
     document.addEventListener("click", handleTerminalClick, true);
@@ -176,7 +216,7 @@ export function TerminalSurface({
                 underline: true
               },
               activate: (_event: MouseEvent, textToOpen: string): void => {
-                onOpenUrl?.(textToOpen);
+                onOpenUrlRef.current?.(textToOpen);
               }
             };
           })
@@ -212,8 +252,10 @@ export function TerminalSurface({
     return () => {
       resizeObserver.disconnect();
       host.removeEventListener("mousedown", focusTerminal);
+      host.removeEventListener("contextmenu", handleTerminalContextMenu, { capture: true });
       document.removeEventListener("click", handleTerminalClick, true);
       inputDisposable.dispose();
+      selectionChangeDisposable.dispose();
       linkProviderDisposable.dispose();
       removeDataListener?.();
       removeExitListener?.();
@@ -226,7 +268,7 @@ export function TerminalSurface({
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [cwd, onOpenUrl, sessionId, shell]);
+  }, [cwd, sessionId, shell]);
 
   return (
     <div className="terminalSurface">

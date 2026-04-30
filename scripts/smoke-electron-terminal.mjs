@@ -328,6 +328,113 @@ async function runTerminalCommand(window, command, expectedText) {
   log(`ok ${command}`);
 }
 
+async function waitForActiveTerminalRowText(window, text) {
+  await window.waitForFunction(
+    (expectedText) =>
+      Array.from(document.querySelectorAll(".paneActive .surfaceBodyFrameActive .terminalHost .xterm-rows > div")).some((row) =>
+        row.textContent?.includes(expectedText)
+      ),
+    text,
+    { timeout: 15_000 }
+  );
+}
+
+async function runTerminalSelectionStabilitySmoke(window) {
+  log("terminal selection stability");
+  const terminal = window.locator(".paneActive .surfaceBodyFrameActive .terminalHost .xterm").first();
+  await terminal.waitFor({ state: "attached", timeout: 15_000 });
+  const box = await terminal.boundingBox();
+  if (!box) {
+    throw new Error("Terminal did not expose a bounding box for selection stability smoke");
+  }
+
+  const stayedMounted = await terminal.evaluate(async (terminalElement) => {
+    window.__wmuxSelectionSmokeTerminal = terminalElement;
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    return window.__wmuxSelectionSmokeTerminal === terminalElement && terminalElement.isConnected;
+  });
+  if (!stayedMounted) {
+    throw new Error("Terminal remounted before selection stability smoke could start");
+  }
+
+  await window.mouse.move(box.x + 32, box.y + 40);
+  await window.mouse.down();
+  await window.mouse.move(box.x + Math.min(box.width - 16, 240), box.y + 40, { steps: 6 });
+  await window.mouse.up();
+
+  const stillMounted = await window.evaluate(() => window.__wmuxSelectionSmokeTerminal?.isConnected === true);
+  if (!stillMounted) {
+    throw new Error("Terminal remounted while clicking or dragging to select text");
+  }
+  log("ok terminal selection stability");
+}
+
+async function runRightClickClipboardSmoke(app, window) {
+  log("right click clipboard");
+  await window.locator('button.surfaceTab[aria-label="Codex Agent"]').click();
+  await window.waitForSelector(".paneActive .surfaceBodyFrameActive .terminalHost .xterm textarea", {
+    state: "attached",
+    timeout: 15_000
+  });
+  await runTerminalCommand(window, "Write-Output WMUX_RIGHT_CLICK_COPY", "WMUX_RIGHT_CLICK_COPY");
+  await waitForActiveTerminalRowText(window, "WMUX_RIGHT_CLICK_COPY");
+
+  const markerBox = await window.evaluate(() => {
+    const marker = "WMUX_RIGHT_CLICK_COPY";
+    const host = document.querySelector(".paneActive .surfaceBodyFrameActive .terminalHost");
+    const row = Array.from(host?.querySelectorAll(".xterm-rows > div") ?? []).find((element) =>
+      element.textContent?.includes(marker)
+    );
+    if (!host || !row) {
+      return null;
+    }
+
+    const rowRect = row.getBoundingClientRect();
+    const hostRect = host.getBoundingClientRect();
+    const markerStart = row.textContent?.indexOf(marker) ?? -1;
+    const characterWidth = rowRect.width / Math.max(1, row.textContent?.length ?? marker.length);
+    return {
+      startX: rowRect.left + markerStart * characterWidth + 2,
+      endX: rowRect.left + (markerStart + marker.length) * characterWidth - 2,
+      y: rowRect.top + rowRect.height / 2,
+      fallbackX: hostRect.left + 24
+    };
+  });
+  if (!markerBox) {
+    throw new Error("Terminal row for right-click copy smoke was not found");
+  }
+
+  await window.mouse.move(markerBox.startX, markerBox.y);
+  await window.mouse.down();
+  await window.mouse.move(markerBox.endX, markerBox.y, { steps: 8 });
+  await window.mouse.up();
+  await window.mouse.click(markerBox.fallbackX, markerBox.y, { button: "right" });
+  await window.waitForFunction(() => window.wmux?.clipboard.readText().includes("WMUX_RIGHT_CLICK_COPY"), null, {
+    timeout: 5_000
+  });
+  const copiedAfter = await app.evaluate(({ clipboard }) => clipboard.readText());
+  if (!copiedAfter.includes("WMUX_RIGHT_CLICK_COPY")) {
+    throw new Error(`Terminal right-click did not copy selection: ${JSON.stringify(copiedAfter)}`);
+  }
+  log("ok terminal right click copy");
+
+  await app.evaluate(({ clipboard }) => clipboard.writeText("WMUX_RIGHT_CLICK_PASTE"));
+  await window.locator(".titleBar").getByRole("button", { name: "Command", exact: true }).click();
+  const commandSearch = window.getByLabel("Command search");
+  await commandSearch.waitFor({ timeout: 15_000 });
+  await commandSearch.fill("prefix ");
+  await commandSearch.evaluate((input) => input.setSelectionRange(input.value.length, input.value.length));
+  await commandSearch.click({ button: "right" });
+  await window.waitForFunction(
+    () => document.querySelector('input[aria-label="Command search"]')?.value === "prefix WMUX_RIGHT_CLICK_PASTE",
+    null,
+    { timeout: 5_000 }
+  );
+  await commandSearch.press("Escape");
+  await window.getByLabel("Command palette").waitFor({ state: "detached", timeout: 15_000 });
+  log("ok input right click paste");
+}
+
 async function navigateActiveBrowser(activePane, url) {
   const address = activePane.locator(".surfaceBodyFrameActive .browserSurface input[aria-label='Browser address']");
   await address.waitFor({ timeout: 15_000 });
@@ -1084,6 +1191,21 @@ async function waitForWorkspaceStateText(text) {
   throw new Error(`workspace state did not include ${text}`);
 }
 
+async function waitForWorkspaceState(workspaceName, predicate, description) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 15_000) {
+    if (existsSync(smokeWorkspaceStatePath)) {
+      const state = JSON.parse(readFileSync(smokeWorkspaceStatePath, "utf8"));
+      const workspace = state.workspaces?.find((item) => item.name === workspaceName);
+      if (workspace && predicate(workspace, state)) {
+        return;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error(`workspace state did not satisfy ${description}`);
+}
+
 async function runSessionRestoreSmoke(currentApp, window) {
   log("session restore");
   await window.getByLabel("New workspace").click();
@@ -1104,8 +1226,17 @@ async function runSessionRestoreSmoke(currentApp, window) {
     { timeout: 15_000 }
   );
   await window.getByLabel("Split horizontally").click();
-  await window.waitForFunction(() => document.querySelectorAll(".pane").length >= 2, null, { timeout: 15_000 });
-  await waitForWorkspaceStateText("Restore Smoke");
+  await window.waitForFunction(() => document.querySelector(".surfaceStage > .split") !== null, null, { timeout: 15_000 });
+  await waitForWorkspaceState(
+    "Restore Smoke",
+    (workspace) => workspace.layout?.type === "split" && Object.keys(workspace.panes ?? {}).length >= 2,
+    "Restore Smoke split layout"
+  );
+  await waitForWorkspaceState(
+    "Restore Smoke",
+    (_workspace, state) => JSON.stringify(state.browserSessions ?? {}).includes(restoreUrl),
+    "Restore Smoke browser session URL"
+  );
 
   await Promise.race([currentApp.close(), new Promise((resolve) => setTimeout(resolve, 3_000))]);
   const restoredApp = await launchApp();
@@ -1152,6 +1283,8 @@ try {
   await runTerminalCommand(window, "ls package.json", "package.json");
   await runTerminalCommand(window, "clear", "Codex Agent");
   await runTerminalCommand(window, "Write-Output WMUX_TERMINAL_SMOKE", "WMUX_TERMINAL_SMOKE");
+  await runTerminalSelectionStabilitySmoke(window);
+  await runRightClickClipboardSmoke(app, window);
   await runEightTerminalSurfaceLatencySmoke(window);
   log("add terminal surface");
   const activePaneTabs = window.locator(".paneActive button.surfaceTab");

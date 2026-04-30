@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
+import { clipboard, contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type {
   PersistedAppState,
   ShellProfile,
@@ -56,6 +56,10 @@ const api = {
   browser: {
     writeScreenshot: (payload: { path: string; base64: string; format: "png" | "jpeg" }): Promise<{ path: string; bytes: number }> =>
       ipcRenderer.invoke("browser:writeScreenshot", payload)
+  },
+  clipboard: {
+    readText: (): string => clipboard.readText(),
+    writeText: (text: string): void => clipboard.writeText(text)
   },
   socket: {
     getPath: (): string | undefined => process.env.WMUX_SOCKET_PATH,

@@ -26,6 +26,7 @@ import {
   type DragEvent,
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent,
   type ReactElement
 } from "react";
@@ -1501,6 +1502,39 @@ function shouldIgnoreGlobalShortcut(event: KeyboardEvent): boolean {
   return false;
 }
 
+function isEditableTextTarget(target: EventTarget | null): target is HTMLInputElement | HTMLTextAreaElement {
+  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
+}
+
+function setNativeInputValue(target: HTMLInputElement | HTMLTextAreaElement, value: string): void {
+  const prototype = target instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
+  descriptor?.set?.call(target, value);
+}
+
+function pasteClipboardTextIntoEditable(target: HTMLInputElement | HTMLTextAreaElement): void {
+  const text = window.wmux?.clipboard.readText() ?? "";
+  if (!text) {
+    return;
+  }
+
+  const start = target.selectionStart ?? target.value.length;
+  const end = target.selectionEnd ?? start;
+  const nextValue = `${target.value.slice(0, start)}${text}${target.value.slice(end)}`;
+  setNativeInputValue(target, nextValue);
+  target.setSelectionRange(start + text.length, start + text.length);
+  target.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: "insertFromPaste" }));
+}
+
+function handleEditableContextMenu(event: ReactMouseEvent<HTMLElement>): void {
+  if (!(event.target instanceof HTMLElement) || event.target.closest(".terminalHost") || !isEditableTextTarget(event.target)) {
+    return;
+  }
+
+  event.preventDefault();
+  pasteClipboardTextIntoEditable(event.target);
+}
+
 export function App(): ReactElement {
   const [workspaces, setWorkspaces] = useState(initialWorkspaces);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(workspaces[0].id);
@@ -2957,7 +2991,7 @@ export function App(): ReactElement {
   }, [activeWorkspace, activeWorkspaceId, workspaces, workspaceNameDraft, editingWorkspaceId]);
 
   return (
-    <main className="appShell">
+    <main className="appShell" onContextMenu={handleEditableContextMenu}>
       <WorkspaceSidebar
         workspaces={workspaces}
         activeWorkspaceId={activeWorkspace.id}
@@ -3008,7 +3042,11 @@ export function App(): ReactElement {
             onAddTerminalSurface={handleAddTerminalSurface}
             onSelectSurface={handleSelectSurface}
             onCloseSurface={handleCloseSurface}
-            onActivatePane={(paneId) => updateActiveWorkspace((workspace) => ({ ...workspace, activePaneId: paneId }))}
+            onActivatePane={(paneId) =>
+              updateActiveWorkspace((workspace) =>
+                workspace.activePaneId === paneId ? workspace : { ...workspace, activePaneId: paneId }
+              )
+            }
             onResizeSplit={handleResizeSplit}
             onClosePane={handleClosePane}
             onDropSurfaceToPane={handleDropSurfaceToPane}
