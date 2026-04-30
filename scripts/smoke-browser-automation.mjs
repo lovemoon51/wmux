@@ -145,7 +145,7 @@ try {
   app = undefined;
 
   app = await launchApp();
-  await getReadyWindow(app);
+  const tokenWindow = await getReadyWindow(app);
   await app.windows()[0].waitForTimeout(1_000);
 
   const noToken = await runCli(["ping"], { allowFailure: true, token: null });
@@ -165,6 +165,16 @@ try {
     throw new Error(`correct token should ping: ${JSON.stringify(ping)}`);
   }
   log("ok browser auth correct token");
+
+  const tokenExposure = await tokenWindow.evaluate((token) => ({
+    bodyContainsToken: document.body.textContent?.includes(token) ?? false,
+    securityState: window.wmux?.getSecurityState ? undefined : "missing"
+  }), smokeSocketToken);
+  const securityState = await tokenWindow.evaluate(() => window.wmux?.getSecurityState?.());
+  if (tokenExposure.bodyContainsToken || JSON.stringify(securityState).includes(smokeSocketToken)) {
+    throw new Error(`socket token should not be exposed in UI/security state: ${JSON.stringify({ tokenExposure, securityState })}`);
+  }
+  log("ok browser auth token not exposed");
 
   const workspaces = await runCli(["list-workspaces"]);
   if (!workspaces.stdout.includes("API Server")) {

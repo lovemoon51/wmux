@@ -52,10 +52,10 @@
 
 ## 4. 安全验收
 
-- [ ] 默认 socket 模式不允许任意本地进程控制终端。
-- [ ] `allowAll` 模式有明确警告。
+- [x] 默认 socket 模式不允许任意本地进程控制终端。
+- [x] `allowAll` 模式有明确警告。
 - [ ] custom command 首次运行需确认或信任目录。
-- [ ] socket token 不写入日志。
+- [x] socket token 不写入日志。
 - [ ] Browser automation 写文件操作需要明确路径。
 
 ## 5. 与 cmux 能力对齐度
