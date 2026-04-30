@@ -1,0 +1,913 @@
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  color-scheme: dark;
+  --bg-app: #0f1115;
+  --bg-sidebar: #15181d;
+  --bg-pane: #101214;
+  --bg-elevated: #1b1f26;
+  --bg-control: #20252d;
+  --border-subtle: #2a3038;
+  --border-strong: #3a424e;
+  --text-primary: #eceff3;
+  --text-secondary: #a9b1bd;
+  --text-muted: #707987;
+  --accent: #3daee9;
+  --success: #58c27d;
+  --warning: #e2b84d;
+  --danger: #ef6b73;
+  --attention: #f59e0b;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body {
+  margin: 0;
+  min-width: 980px;
+  min-height: 640px;
+  overflow: hidden;
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+button {
+  color: inherit;
+  font: inherit;
+}
+
+.appShell {
+  display: grid;
+  grid-template-columns: 276px minmax(0, 1fr);
+  width: 100vw;
+  height: 100vh;
+  background: var(--bg-app);
+}
+
+.sidebar {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--bg-sidebar);
+  padding: 14px 12px;
+}
+
+.brandRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 42px;
+}
+
+.brandMark {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: #1d232b;
+  color: var(--accent);
+}
+
+.brandName {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.brandSub {
+  margin-top: 1px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.searchButton,
+.utilityButton,
+.toolbarButton,
+.commandButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-control);
+}
+
+.searchButton {
+  justify-content: flex-start;
+  width: 100%;
+  height: 34px;
+  margin-top: 14px;
+  padding: 0 9px;
+  color: var(--text-secondary);
+}
+
+kbd {
+  margin-left: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.sidebarSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 18px 2px 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.iconButton {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.iconButton:hover,
+.surfaceAdd:hover,
+.utilityButton:hover,
+.toolbarButton:hover,
+.commandButton:hover,
+.searchButton:hover {
+  border-color: var(--border-strong);
+  background: #252b34;
+}
+
+.iconButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.workspaceList {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 7px;
+  overflow: auto;
+}
+
+.workspaceItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: stretch;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  padding: 5px;
+}
+
+.workspaceItem:hover {
+  background: #1a1f26;
+}
+
+.workspaceItemActive {
+  border-color: #33404b;
+  background: #1f252d;
+}
+
+.workspaceSelect {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 14px minmax(0, 1fr);
+  gap: 9px;
+  border: 0;
+  background: transparent;
+  padding: 5px 4px;
+  cursor: default;
+  text-align: left;
+}
+
+.workspaceActions {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.workspaceItem:hover .workspaceActions,
+.workspaceItem:focus-within .workspaceActions,
+.workspaceItemActive .workspaceActions {
+  opacity: 1;
+}
+
+.workspaceActionButton {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.workspaceActionButton:hover {
+  border-color: var(--border-strong);
+  background: #252b34;
+  color: var(--text-secondary);
+}
+
+.workspaceActionButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.statusRing {
+  width: 10px;
+  height: 10px;
+  margin-top: 4px;
+  border: 2px solid currentColor;
+  border-radius: 999px;
+  color: var(--text-muted);
+}
+
+.statusDot,
+.tabStatus {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+  color: var(--text-muted);
+}
+
+.statusIdle {
+  color: var(--text-muted);
+}
+
+.statusRunning {
+  color: var(--accent);
+}
+
+.statusAttention {
+  color: var(--attention);
+}
+
+.statusSuccess {
+  color: var(--success);
+}
+
+.statusError {
+  color: var(--danger);
+}
+
+.workspaceMain,
+.workspaceTitleRow,
+.workspaceMeta {
+  display: flex;
+  min-width: 0;
+}
+
+.workspaceMain {
+  flex-direction: column;
+  gap: 5px;
+}
+
+.workspaceTitleRow {
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workspaceName {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspaceNameInput {
+  min-width: 0;
+  width: 100%;
+  height: 21px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  outline: 0;
+  background: #101419;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 0 5px;
+}
+
+.workspaceStatus {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.workspacePath,
+.workspaceNotice {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspaceNotice {
+  color: var(--text-secondary);
+}
+
+.workspaceMeta {
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.metaPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #303844;
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.sidebarFooter {
+  display: grid;
+  gap: 7px;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 10px;
+}
+
+.utilityButton {
+  height: 32px;
+  padding: 0 9px;
+  color: var(--text-secondary);
+}
+
+.workspaceArea {
+  display: grid;
+  min-width: 0;
+  grid-template-rows: 58px minmax(0, 1fr);
+}
+
+.titleBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-subtle);
+  background: #111419;
+  padding: 0 14px;
+}
+
+.trafficSpacer {
+  display: none;
+}
+
+.titleIdentity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.titleIdentity h1 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.titleIdentity p {
+  overflow: hidden;
+  max-width: 520px;
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.titleActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.commandButton,
+.toolbarButton,
+.shellSelectLabel {
+  height: 32px;
+  padding: 0 10px;
+  color: var(--text-secondary);
+}
+
+.commandButton {
+  color: var(--text-primary);
+}
+
+.shellSelectLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-control);
+}
+
+.shellSelectLabel select {
+  max-width: 132px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+}
+
+.shellSelectLabel option {
+  background: #1b1f26;
+  color: var(--text-primary);
+}
+
+.versionText {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.surfaceStage {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  padding: 10px;
+}
+
+.split {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.split-horizontal {
+  grid-template-columns: minmax(240px, var(--split-ratio)) 5px minmax(240px, 1fr);
+}
+
+.split-vertical {
+  grid-template-rows: minmax(180px, var(--split-ratio)) 5px minmax(160px, 1fr);
+}
+
+.splitHandle {
+  border-radius: 8px;
+  background: transparent;
+  touch-action: none;
+}
+
+.split-horizontal > .splitHandle {
+  cursor: col-resize;
+}
+
+.split-vertical > .splitHandle {
+  cursor: row-resize;
+}
+
+.splitHandle:hover {
+  background: #303844;
+}
+
+.pane {
+  position: relative;
+  z-index: 0;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: 34px minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--bg-pane);
+}
+
+.paneActive {
+  z-index: 1;
+  border-color: #4b647a;
+  box-shadow: 0 0 0 1px rgba(61, 174, 233, 0.16);
+}
+
+.paneDrop::after {
+  position: absolute;
+  z-index: 4;
+  border: 1px solid rgba(61, 174, 233, 0.9);
+  border-radius: 5px;
+  background: rgba(61, 174, 233, 0.16);
+  content: "";
+  pointer-events: none;
+}
+
+.paneDrop-left::after {
+  inset: 34px 50% 0 0;
+}
+
+.paneDrop-right::after {
+  inset: 34px 0 0 50%;
+}
+
+.paneDrop-top::after {
+  inset: 34px 0 50% 0;
+}
+
+.paneDrop-bottom::after {
+  inset: calc(50% + 17px) 0 0 0;
+}
+
+.surfaceBodyStack {
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.surfaceBodyFrame {
+  position: absolute;
+  inset: 0;
+  display: none;
+  min-width: 0;
+  min-height: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.surfaceBodyFrameActive {
+  display: block;
+  z-index: 1;
+  pointer-events: auto;
+}
+
+.surfaceTabs {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border-subtle);
+  background: #15191f;
+  padding: 4px;
+}
+
+.surfaceTab {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 190px;
+  height: 25px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  padding: 0 7px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.surfaceTab span:last-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.surfaceTabActive {
+  border-color: #303844;
+  background: #20252d;
+  color: var(--text-primary);
+}
+
+.tabClose {
+  color: var(--text-muted);
+}
+
+.tabCloseButton {
+  display: inline-grid;
+  flex: none;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  border-radius: 3px;
+}
+
+.tabCloseButton:hover {
+  background: #303844;
+}
+
+.surfaceAdd {
+  display: inline-grid;
+  flex: none;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.paneCloseButton {
+  position: relative;
+  z-index: 1;
+  display: inline-grid;
+  flex: none;
+  width: 25px;
+  height: 25px;
+  margin-left: auto;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.paneCloseButton:hover {
+  border-color: var(--border-strong);
+  background: #252b34;
+  color: var(--text-secondary);
+}
+
+.terminalSurface {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-pane);
+}
+
+.terminalSurface {
+  grid-template-rows: 32px minmax(0, 1fr);
+}
+
+.terminalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #1f252d;
+  padding: 0 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.terminalPrompt,
+.terminalState {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.terminalHost {
+  overflow: auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 8px 10px;
+  color: #d7dee7;
+  scrollbar-color: rgba(112, 121, 135, 0.34) transparent;
+  scrollbar-width: thin;
+}
+
+.terminalHost::-webkit-scrollbar,
+.terminalHost .xterm-viewport::-webkit-scrollbar,
+.terminalHost .xterm-scrollable-element::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.terminalHost::-webkit-scrollbar-track,
+.terminalHost .xterm-viewport::-webkit-scrollbar-track,
+.terminalHost .xterm-scrollable-element::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.terminalHost::-webkit-scrollbar-thumb,
+.terminalHost .xterm-viewport::-webkit-scrollbar-thumb,
+.terminalHost .xterm-scrollable-element::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: rgba(112, 121, 135, 0.34);
+  background-clip: padding-box;
+}
+
+.terminalHost:hover::-webkit-scrollbar-thumb,
+.terminalHost:hover .xterm-viewport::-webkit-scrollbar-thumb,
+.terminalHost:hover .xterm-scrollable-element::-webkit-scrollbar-thumb {
+  background: rgba(169, 177, 189, 0.58);
+  background-clip: padding-box;
+}
+
+.terminalHost .xterm {
+  height: 100%;
+}
+
+.terminalHost .xterm-viewport {
+  background: transparent !important;
+  scrollbar-color: rgba(112, 121, 135, 0.34) transparent;
+  scrollbar-width: thin;
+}
+
+.terminalHost .xterm .xterm-scrollable-element > .scrollbar {
+  width: 8px !important;
+  background: transparent !important;
+}
+
+.terminalHost .xterm .xterm-scrollable-element > .scrollbar > .slider {
+  border-radius: 999px !important;
+  background: rgba(112, 121, 135, 0.34) !important;
+}
+
+.terminalHost:hover .xterm .xterm-scrollable-element > .scrollbar > .slider,
+.terminalHost .xterm .xterm-scrollable-element > .scrollbar > .slider:hover,
+.terminalHost .xterm .xterm-scrollable-element > .scrollbar > .slider.active {
+  background: rgba(169, 177, 189, 0.58) !important;
+}
+
+.browserSurface {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: 36px minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--bg-pane);
+}
+
+.browserToolbar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  border-bottom: 1px solid #1f252d;
+  padding: 4px 6px;
+}
+
+.addressField {
+  display: flex;
+  min-width: 0;
+  height: 28px;
+  flex: 1;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: #0f1216;
+  padding: 0 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.addressField input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+}
+
+.addressField input::selection {
+  background: #314253;
+  color: var(--text-primary);
+}
+
+.browserViewport {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.browserWebview {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: #ffffff;
+}
+
+.addressField span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browserPreview {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px;
+  background: #f3f5f7;
+  color: #1b2430;
+}
+
+.previewTopline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #536171;
+  font-size: 12px;
+}
+
+.previewHero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 18px;
+  border: 1px solid #d9e0e7;
+  border-radius: 7px;
+  background: #ffffff;
+  padding: 18px;
+}
+
+.previewHero svg {
+  color: #237aa8;
+}
+
+.previewHero h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.previewHero p {
+  margin: 5px 0 0;
+  color: #637184;
+  font-size: 13px;
+}
+
+.previewGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.previewGrid div {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #d9e0e7;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.previewGrid strong {
+  font-size: 13px;
+}
+
+.previewGrid span {
+  color: #637184;
+  font-size: 12px;
+}
+
+.previewAction {
+  display: inline-flex;
+  height: 32px;
+  align-items: center;
+  gap: 7px;
+  margin-top: 14px;
+  border: 1px solid #a9c8d9;
+  border-radius: 5px;
+  background: #e7f4fb;
+  color: #185b7b;
+  padding: 0 10px;
+}
+
+@media (max-width: 1120px) {
+  .appShell {
+    grid-template-columns: 238px minmax(0, 1fr);
+  }
+
+  .toolbarButton span,
+  .commandButton span {
+    display: none;
+  }
+
+  .shellSelectLabel select {
+    max-width: 86px;
+  }
+}
