@@ -115,13 +115,13 @@ wmux browser errors list --surface surface:3
 | `system.capabilities` | `{}` | method list |
 | `workspace.list` | `{}` | workspace list |
 | `workspace.create` | `{ name?, cwd?, layout? }` | workspace |
-| `workspace.select` | `{ workspaceId }` | ok |
+| `workspace.select` | `{ workspaceId }` | selected workspace |
 | `workspace.close` | `{ workspaceId }` | ok |
 | `surface.list` | `{ workspaceId? }` | surface list |
 | `surface.createTerminal` | `{ paneId?, name?, cwd?, command? }` | surface |
 | `surface.createBrowser` | `{ paneId?, name?, url? }` | surface |
 | `surface.split` | `{ direction, surfaceId? }` | pane/surface ids |
-| `surface.focus` | `{ surfaceId }` | ok |
+| `surface.focus` | `{ surfaceId }` | selected surface ids |
 | `surface.sendText` | `{ surfaceId?, text }` | ok |
 | `surface.sendKey` | `{ surfaceId?, key }` | ok |
 | `status.notify` | `{ workspaceId?, title, body? }` | notice |

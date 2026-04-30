@@ -68,6 +68,7 @@ import type {
   WmuxSurfaceConfig,
   Workspace,
   WorkspaceInspection,
+  WorkspaceSelectParams,
   WorkspaceStatus,
   WorkspaceSummary
 } from "@shared/types";
@@ -765,6 +766,7 @@ const socketCapabilities: SocketRpcMethod[] = [
   "system.identify",
   "system.capabilities",
   "workspace.list",
+  "workspace.select",
   "surface.list",
   "surface.focus",
   "surface.sendText",
@@ -1900,6 +1902,36 @@ export function App(): ReactElement {
         window.wmux?.socket.respond(
           createSocketSuccessResponse(request.id, {
             workspaces: createWorkspaceSummaries(currentWorkspaces, currentActiveWorkspaceId)
+          })
+        );
+        return;
+      }
+
+      if (request.method === "workspace.select") {
+        const params = (request.params ?? {}) as Partial<WorkspaceSelectParams>;
+        if (typeof params.workspaceId !== "string" || !params.workspaceId.trim()) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "BAD_REQUEST", "workspace.select 需要 workspaceId")
+          );
+          return;
+        }
+
+        const targetWorkspace = currentWorkspaces.find((workspace) => workspace.id === params.workspaceId);
+        if (!targetWorkspace) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "NOT_FOUND", "找不到 workspace", {
+              workspaceId: params.workspaceId
+            })
+          );
+          return;
+        }
+
+        setActiveWorkspaceId(targetWorkspace.id);
+        window.wmux?.socket.respond(
+          createSocketSuccessResponse(request.id, {
+            workspaceId: targetWorkspace.id,
+            workspaceName: targetWorkspace.name,
+            activePaneId: targetWorkspace.activePaneId
           })
         );
         return;

@@ -80,6 +80,7 @@ export type SocketRpcMethod =
   | "system.identify"
   | "system.capabilities"
   | "workspace.list"
+  | "workspace.select"
   | "surface.list"
   | "surface.focus"
   | "surface.sendText"
@@ -171,6 +172,10 @@ export type ClearStatusParams = {
 
 export type StatusListParams = {
   workspaceId?: string;
+};
+
+export type WorkspaceSelectParams = {
+  workspaceId: string;
 };
 
 export type SurfaceListParams = {

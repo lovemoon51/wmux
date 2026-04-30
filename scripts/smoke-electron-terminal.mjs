@@ -466,6 +466,7 @@ async function runCliSocketSmoke(window) {
   for (const method of [
     "system.identify",
     "system.capabilities",
+    "workspace.select",
     "surface.list",
     "surface.focus",
     "surface.sendKey",
@@ -484,6 +485,26 @@ async function runCliSocketSmoke(window) {
     throw new Error(`wmux list-workspaces did not include API Server: ${workspaceOutput}`);
   }
   log("ok wmux list-workspaces");
+
+  const selectDocsOutput = await runCliCommand(["select-workspace", "--workspace", "workspace-docs"]);
+  if (!selectDocsOutput.includes("selected Docs")) {
+    throw new Error(`wmux select-workspace did not report selected Docs: ${selectDocsOutput}`);
+  }
+  const selectedDocsOutput = await runCliCommand(["identify", "--json"]);
+  const selectedDocs = JSON.parse(selectedDocsOutput);
+  if (selectedDocs.workspaceId !== "workspace-docs" || selectedDocs.workspaceName !== "Docs") {
+    throw new Error(`wmux select-workspace did not activate Docs: ${selectedDocsOutput}`);
+  }
+  const selectApiOutput = await runCliCommand(["select-workspace", "--workspace", "workspace-api"]);
+  if (!selectApiOutput.includes("selected API Server")) {
+    throw new Error(`wmux select-workspace did not report selected API Server: ${selectApiOutput}`);
+  }
+  const selectedApiOutput = await runCliCommand(["identify", "--json"]);
+  const selectedApi = JSON.parse(selectedApiOutput);
+  if (selectedApi.workspaceId !== "workspace-api" || selectedApi.workspaceName !== "API Server") {
+    throw new Error(`wmux select-workspace did not restore API Server: ${selectedApiOutput}`);
+  }
+  log("ok wmux select-workspace");
 
   const surfaceOutput = await runCliCommand(["surface", "list"]);
   if (!surfaceOutput.includes("surface-agent") || !surfaceOutput.includes("terminal") || !surfaceOutput.includes("API Server")) {
