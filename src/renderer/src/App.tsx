@@ -3668,6 +3668,33 @@ export function App(): ReactElement {
     setActiveWorkspaceId(workspaces[nextIndex].id);
   };
 
+  // Cmd+1~8：直接跳到第 N 个 workspace（cmux 高频快捷键）
+  const handleSelectWorkspaceByIndex = (index: number): void => {
+    if (index < 0 || index >= workspaces.length) {
+      return;
+    }
+    setActiveWorkspaceId(workspaces[index].id);
+  };
+
+  // Cmd+Shift+U：跳到最新未读通知的 workspace
+  const handleJumpToLatestNotification = (): void => {
+    let latestAt = "";
+    let latestId: string | null = null;
+    for (const workspace of workspaces) {
+      const firstEvent = workspace.recentEvents?.[0];
+      if (firstEvent && firstEvent.at > latestAt) {
+        latestAt = firstEvent.at;
+        latestId = workspace.id;
+      } else if (!firstEvent && workspace.notice && !latestId) {
+        // 没有事件时间戳但仍有通知文本：兜底选第一个
+        latestId = workspace.id;
+      }
+    }
+    if (latestId) {
+      setActiveWorkspaceId(latestId);
+    }
+  };
+
   const handleSplitActivePane = (direction: "horizontal" | "vertical"): void => {
     updateActiveWorkspace((workspace) => {
       const { paneId, pane, surface } = createPaneWithTerminal();
@@ -3807,6 +3834,20 @@ export function App(): ReactElement {
       if (isPrimary && key === "k") {
         event.preventDefault();
         openCommandPalette();
+        return;
+      }
+
+      // Ctrl/Cmd+1~8：跳转到对应序号的 workspace（cmux 高频快捷键）
+      if (isPrimary && !event.altKey && !event.shiftKey && /^[1-8]$/.test(event.key)) {
+        event.preventDefault();
+        handleSelectWorkspaceByIndex(Number(event.key) - 1);
+        return;
+      }
+
+      // Ctrl/Cmd+Shift+U：跳到最新有未读通知的 workspace
+      if (isPrimary && event.shiftKey && key === "u") {
+        event.preventDefault();
+        handleJumpToLatestNotification();
         return;
       }
 
