@@ -32,6 +32,7 @@ import {
 } from "react";
 import type {
   BrowserClickParams,
+  BrowserConsoleEntry,
   BrowserEvalParams,
   BrowserFillParams,
   BrowserNavigateParams,
@@ -108,6 +109,13 @@ type BrowserWebviewElement = HTMLElement & {
   setZoomFactor?: (factor: number) => void;
 };
 
+type BrowserConsoleMessageEvent = Event & {
+  level?: unknown;
+  message?: string;
+  line?: number;
+  sourceId?: string;
+};
+
 type BrowserLoadFailureEvent = Event & {
   errorCode?: number;
   errorDescription?: string;
@@ -121,6 +129,7 @@ type BrowserRuntime = {
   viewId?: number;
   webview: BrowserWebviewElement;
   navigate: (url: string, waitUntil: BrowserWaitUntil, timeoutMs: number) => Promise<string>;
+  consoleEntries: BrowserConsoleEntry[];
 };
 
 type SplitDropEdge = "top" | "right" | "bottom" | "left";
@@ -165,6 +174,7 @@ type WorkspaceCommandBuildResult = {
 
 const browserSessions = new Map<string, BrowserSessionState>();
 const browserRuntimes = new Map<string, BrowserRuntime>();
+const maxBrowserConsoleEntries = 200;
 
 function getBrowserSessionSnapshot(): PersistedAppState["browserSessions"] {
   return Object.fromEntries(browserSessions.entries());
@@ -898,6 +908,8 @@ const socketCapabilities: SocketRpcMethod[] = [
   "browser.eval",
   "browser.snapshot",
   "browser.list",
+  "browser.console.list",
+  "browser.errors.list",
   "browser.screenshot"
 ];
 
@@ -909,6 +921,8 @@ function isBrowserRpcMethod(method: string): method is BrowserRpcMethod {
     method === "browser.eval" ||
     method === "browser.snapshot" ||
     method === "browser.list" ||
+    method === "browser.console.list" ||
+    method === "browser.errors.list" ||
     method === "browser.screenshot"
   );
 }
@@ -950,6 +964,48 @@ function readSelectorWait(params: unknown): BrowserSelectorWait {
   }
 
   return "visible";
+}
+
+function readBrowserLogLimit(params: unknown): number {
+  if (isRecord(params) && typeof params.limit === "number" && Number.isFinite(params.limit) && params.limit > 0) {
+    return Math.min(Math.floor(params.limit), maxBrowserConsoleEntries);
+  }
+
+  return 50;
+}
+
+function normalizeBrowserConsoleLevel(level: unknown): BrowserConsoleEntry["level"] {
+  if (level === "debug" || level === "info" || level === "log" || level === "warn" || level === "error") {
+    return level;
+  }
+  if (level === "warning") {
+    return "warn";
+  }
+  const numericLevel = typeof level === "number" ? level : typeof level === "string" ? Number(level) : Number.NaN;
+  if (Number.isFinite(numericLevel)) {
+    if (numericLevel === 1) {
+      return "info";
+    }
+    if (numericLevel === 2) {
+      return "warn";
+    }
+    if (numericLevel === 3) {
+      return "error";
+    }
+  }
+
+  return "log";
+}
+
+function appendBrowserConsoleEntry(runtime: BrowserRuntime, entry: Omit<BrowserConsoleEntry, "id" | "at">): void {
+  runtime.consoleEntries.push({
+    id: `browser-console-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    at: new Date().toISOString(),
+    ...entry
+  });
+  if (runtime.consoleEntries.length > maxBrowserConsoleEntries) {
+    runtime.consoleEntries.splice(0, runtime.consoleEntries.length - maxBrowserConsoleEntries);
+  }
 }
 
 function getBrowserSurfaces(workspace: Workspace): Array<{ surface: Surface; paneId: string; workspaceId: string }> {
@@ -1451,6 +1507,18 @@ async function runBrowserRpc(
 
   const runtime = await waitForBrowserRuntime(resolved.surface.id, getBrowserTimeout(params, method === "browser.screenshot" ? 10_000 : 5000));
   const commonResult = { surfaceId: resolved.surface.id, workspaceId: resolved.workspace.id, paneId: resolved.paneId };
+
+  if (method === "browser.console.list" || method === "browser.errors.list") {
+    const limit = readBrowserLogLimit(params);
+    const entries =
+      method === "browser.errors.list"
+        ? runtime.consoleEntries.filter((entry) => entry.level === "error")
+        : runtime.consoleEntries;
+    return {
+      ...commonResult,
+      entries: entries.slice(-limit)
+    };
+  }
 
   if (method === "browser.navigate") {
     const navigateParams = params as Partial<BrowserNavigateParams>;
@@ -4339,6 +4407,7 @@ function BrowserSurface({
   const browserHistoryRef = useRef(session.history);
   const browserHistoryIndexRef = useRef(session.historyIndex);
   const desiredUrlRef = useRef(session.url);
+  const consoleEntriesRef = useRef<BrowserConsoleEntry[]>([]);
   const [url, setUrl] = useState(session.url);
   const [draftUrl, setDraftUrl] = useState(session.url);
   const [canGoBack, setCanGoBack] = useState(false);
@@ -4408,6 +4477,51 @@ function BrowserSurface({
       webview.removeEventListener("did-finish-load", syncNavigationState);
     };
   }, [applyBrowserZoom, onUpdateSurfaceSubtitle, persistBrowserSession, surface.id, url]);
+
+  useEffect(() => {
+    const webview = webviewRef.current;
+    if (!webview) {
+      return;
+    }
+
+    const pushEntry = (entry: Omit<BrowserConsoleEntry, "id" | "at">): void => {
+      const runtime = browserRuntimes.get(surface.id);
+      if (!runtime) {
+        return;
+      }
+      appendBrowserConsoleEntry(runtime, entry);
+    };
+    const handleConsoleMessage = (event: Event): void => {
+      const messageEvent = event as BrowserConsoleMessageEvent;
+      pushEntry({
+        level: normalizeBrowserConsoleLevel(messageEvent.level),
+        message: messageEvent.message ?? "",
+        source: messageEvent.sourceId,
+        line: messageEvent.line,
+        url: webview.getURL?.()
+      });
+    };
+    const handleFailLoad = (event: Event): void => {
+      const failure = event as BrowserLoadFailureEvent;
+      if (isIgnorableBrowserLoadFailure(failure, desiredUrlRef.current)) {
+        return;
+      }
+      pushEntry({
+        level: "error",
+        message: failure.errorDescription || "browser navigation failed",
+        source: "did-fail-load",
+        url: failure.validatedURL || webview.getURL?.()
+      });
+    };
+
+    webview.addEventListener("console-message", handleConsoleMessage);
+    webview.addEventListener("did-fail-load", handleFailLoad);
+
+    return () => {
+      webview.removeEventListener("console-message", handleConsoleMessage);
+      webview.removeEventListener("did-fail-load", handleFailLoad);
+    };
+  }, [surface.id]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -4543,7 +4657,8 @@ function BrowserSurface({
       surfaceId: surface.id,
       runtimeId: surface.id,
       webview,
-      navigate: navigateBrowserRuntime
+      navigate: navigateBrowserRuntime,
+      consoleEntries: consoleEntriesRef.current
     });
 
     return () => {

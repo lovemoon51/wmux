@@ -83,6 +83,10 @@ function parseJson(output) {
 
 const smokeHtml = encodeURIComponent(`<!doctype html>
 <title>WMUX Browser Automation Smoke</title>
+<script>
+  console.log("WMUX_CONSOLE_LOG");
+  console.error("WMUX_CONSOLE_ERROR");
+</script>
 <main>
   <h1>WMUX_BROWSER_AUTOMATION</h1>
   <input id="name" />
@@ -287,6 +291,31 @@ try {
     throw new Error(`click did not update dataset: ${JSON.stringify(clickedValue)}`);
   }
   log("ok browser click");
+
+  const consoleEntries = parseJson(
+    (await runCli(["browser", "console", "list", "--surface", navigate.surfaceId, "--json"])).stdout
+  );
+  if (
+    !consoleEntries.entries?.some((entry) => entry.message.includes("WMUX_CONSOLE_LOG")) ||
+    !consoleEntries.entries?.some((entry) => entry.message.includes("WMUX_CONSOLE_ERROR"))
+  ) {
+    throw new Error(`browser console list did not include expected entries: ${JSON.stringify(consoleEntries)}`);
+  }
+  const errorEntries = parseJson(
+    (await runCli(["browser", "errors", "list", "--surface", navigate.surfaceId, "--json"])).stdout
+  );
+  if (
+    !errorEntries.entries?.length ||
+    !errorEntries.entries.every((entry) => entry.level === "error") ||
+    !errorEntries.entries.some((entry) => entry.message.includes("WMUX_CONSOLE_ERROR"))
+  ) {
+    throw new Error(`browser errors list did not include expected error entries: ${JSON.stringify(errorEntries)}`);
+  }
+  const consoleHuman = await runCli(["browser", "console", "list", "--surface", navigate.surfaceId, "--limit", "10"]);
+  if (!consoleHuman.stdout.includes("WMUX_CONSOLE_ERROR")) {
+    throw new Error(`browser console list human output did not include latest entry: ${JSON.stringify(consoleHuman)}`);
+  }
+  log("ok browser console/errors list");
 
   const stateValue = parseJson(
     (

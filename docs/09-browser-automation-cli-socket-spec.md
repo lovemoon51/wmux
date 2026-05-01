@@ -647,14 +647,19 @@ INTERNAL
 12. CLI 调 `wmux browser screenshot --out output/playwright/browser-automation-smoke.png`，断言文件存在且大于 1KB。
 13. CLI 调 `wmux browser screenshot --base64 --json`，断言 `mimeType` 和 `base64` 存在。
 14. 创建第二个 browser surface 后调用 `wmux browser snapshot`，断言返回 `AMBIGUOUS_TARGET` 且 CLI 输出候选 `--surface <id>`；再用 `--surface` 精确指定并成功。
-15. 调用 `wmux browser click "#submit" --create`，断言 CLI exit code 为 `2`。
-16. 关闭 Electron，清理临时 userData。
+15. CLI 调 `wmux browser console list --surface <id> --json` 和 `wmux browser errors list --surface <id> --json`，断言可读取页面 console log/error，且 errors 只返回 error 级别。
+16. 调用 `wmux browser click "#submit" --create`，断言 CLI exit code 为 `2`。
+17. 关闭 Electron，清理临时 userData。
 
 测试页面：
 
 ```html
 <!doctype html>
 <title>WMUX Browser Automation Smoke</title>
+<script>
+  console.log("WMUX_CONSOLE_LOG");
+  console.error("WMUX_CONSOLE_ERROR");
+</script>
 <main>
   <h1>WMUX_BROWSER_AUTOMATION</h1>
   <input id="name" />
@@ -672,6 +677,7 @@ ok browser list
 ok browser snapshot
 ok browser fill
 ok browser click
+ok browser console/errors list
 ok browser eval
 ok browser screenshot file
 ok browser screenshot base64
@@ -685,7 +691,7 @@ browser automation smoke ok
 - 安全模式、token、allowAll UI 警告。
 - iframe selector。
 - Playwright role/text selector 语法。
-- console/errors/cookies/storage API。
+- cookies/storage API。
 - full page screenshot 的完美实现。
 - 跨 workspace 批量浏览器自动化。
 

@@ -268,6 +268,8 @@ export type BrowserRpcMethod =
   | "browser.eval"
   | "browser.snapshot"
   | "browser.list"
+  | "browser.console.list"
+  | "browser.errors.list"
   | "browser.screenshot";
 
 export type BrowserWaitUntil = "none" | "domcontentloaded" | "load";
@@ -290,6 +292,18 @@ export type BrowserSurfaceSummary = {
   active: boolean;
   url: string;
   title?: string;
+};
+
+export type BrowserConsoleLevel = "debug" | "info" | "log" | "warn" | "error";
+
+export type BrowserConsoleEntry = {
+  id: string;
+  at: string;
+  level: BrowserConsoleLevel;
+  message: string;
+  source?: string;
+  line?: number;
+  url?: string;
 };
 
 export type BrowserNavigateParams = BrowserSurfaceSelector & {
@@ -347,6 +361,10 @@ export type BrowserListParams = {
   workspaceId?: string;
 };
 
+export type BrowserConsoleListParams = BrowserSurfaceSelector & {
+  limit?: number;
+};
+
 export type BrowserRpcParams =
   | BrowserNavigateParams
   | BrowserClickParams
@@ -354,7 +372,8 @@ export type BrowserRpcParams =
   | BrowserEvalParams
   | BrowserSnapshotParams
   | BrowserScreenshotParams
-  | BrowserListParams;
+  | BrowserListParams
+  | BrowserConsoleListParams;
 
 export type ShellProfileOption = {
   id: ShellProfile;

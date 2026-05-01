@@ -145,6 +145,8 @@ wmux browser errors list --surface surface:3
 | `browser.click` | `{ surfaceId, selector }` | ok |
 | `browser.fill` | `{ surfaceId, selector, text }` | ok |
 | `browser.eval` | `{ surfaceId, script }` | value |
+| `browser.console.list` | `{ surfaceId?, paneId?, workspaceId?, active?, limit? }` | console entries |
+| `browser.errors.list` | `{ surfaceId?, paneId?, workspaceId?, active?, limit? }` | error entries |
 
 ## 7. 错误码
 

@@ -42,6 +42,8 @@ wmux browser list
 wmux browser snapshot --surface <surfaceId>
 wmux browser fill "#name" "wmux" --surface <surfaceId>
 wmux browser click "#submit" --surface <surfaceId>
+wmux browser console list --surface <surfaceId>
+wmux browser errors list --surface <surfaceId>
 wmux browser screenshot --surface <surfaceId> --out output/playwright/browser.png
 ```
 

@@ -56,6 +56,8 @@ function printUsage() {
   wmux browser fill <selector> <text> [--text <text>] [--text-file <path>] [--json]
   wmux browser eval <script> [--json]
   wmux browser eval-file <path> [--json]
+  wmux browser console list [--surface <id>] [--limit <count>] [--json]
+  wmux browser errors list [--surface <id>] [--limit <count>] [--json]
   wmux browser snapshot [--selector <selector>] [--json] [--out <path>]
   wmux browser screenshot [--out <path>] [--format png|jpeg] [--base64] [--json]`);
 }
@@ -105,6 +107,7 @@ const optionFlagsWithValues = new Set([
   "--direction",
   "--format",
   "--load-wait",
+  "--limit",
   "--name",
   "--notice",
   "--out",
@@ -148,6 +151,18 @@ function readTimeout() {
     throw cliError("--timeout 必须是正数毫秒");
   }
   return Math.floor(timeoutMs);
+}
+
+function readLimit() {
+  const rawLimit = parseOption("--limit");
+  if (rawLimit === undefined) {
+    return undefined;
+  }
+  const limit = Number(rawLimit);
+  if (!Number.isFinite(limit) || limit <= 0) {
+    throw cliError("--limit 必须是正整数");
+  }
+  return Math.floor(limit);
 }
 
 function readSelectorParams(allowCreate) {
@@ -218,6 +233,21 @@ function createBrowserRequest() {
       method: "browser.list",
       params: {
         ...(parseOption("--workspace") ? { workspaceId: parseOption("--workspace") } : {})
+      }
+    };
+  }
+
+  if (browserCommand === "console" || browserCommand === "errors") {
+    const listCommand = args[2];
+    if (listCommand !== "list") {
+      throw cliError(`browser ${browserCommand} 需要 list 子命令`);
+    }
+    const limit = readLimit();
+    return {
+      method: browserCommand === "console" ? "browser.console.list" : "browser.errors.list",
+      params: {
+        ...readSelectorParams(false),
+        ...(limit ? { limit } : {})
       }
     };
   }
@@ -669,6 +699,13 @@ function printBrowserResult(result) {
   }
   if (browserCommand === "snapshot" && outPath && typeof result?.snapshot === "string") {
     return writeFileAndPrint(outPath, result.snapshot);
+  }
+  if (browserCommand === "console" || browserCommand === "errors") {
+    for (const entry of result?.entries ?? []) {
+      const location = entry.source ? `\t${entry.source}${entry.line ? `:${entry.line}` : ""}` : "";
+      console.log(`${entry.at}\t${entry.level}\t${entry.message}${location}`);
+    }
+    return;
   }
   if (browserCommand === "eval") {
     console.log(typeof result?.value === "string" ? result.value : JSON.stringify(result?.value));

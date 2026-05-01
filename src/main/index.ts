@@ -530,6 +530,8 @@ function isBrowserRpcMethod(method: string): method is BrowserRpcMethod {
     method === "browser.eval" ||
     method === "browser.snapshot" ||
     method === "browser.list" ||
+    method === "browser.console.list" ||
+    method === "browser.errors.list" ||
     method === "browser.screenshot"
   );
 }
