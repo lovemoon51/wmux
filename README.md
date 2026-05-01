@@ -51,6 +51,7 @@ wmux browser screenshot --surface <surfaceId> --out output/playwright/browser.pn
 
 ```bash
 wmux current-workspace
+wmux config
 wmux list-surfaces
 wmux focus-surface --surface <surfaceId>
 wmux send-surface --surface <surfaceId> "npm test\n"
@@ -61,6 +62,7 @@ wmux new-split --direction vertical
 ## Project Config
 
 项目命令默认读取仓库根目录的 `wmux.json`。为兼容 cmux 项目，若 `wmux.json` 不存在，wmux 会读取 `.cmux/cmux.json`，并复用同一套 command/workspace layout schema。
+可用 `wmux config --json` 查看当前加载的全局/项目配置来源和命令清单。
 
 ## Terminal Link
 

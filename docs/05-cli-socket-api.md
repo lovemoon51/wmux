@@ -48,6 +48,7 @@ allowAll 允许本机任意进程连接，仅开发环境建议
 wmux ping
 wmux identify --json
 wmux capabilities --json
+wmux config --json
 ```
 
 ### 工作区
@@ -119,6 +120,7 @@ wmux browser errors list --surface surface:3
 | `system.ping` | `{}` | `{ pong: true }` |
 | `system.identify` | `{}` | active ids |
 | `system.capabilities` | `{}` | method list |
+| `config.list` | `{}` | config sources and commands |
 | `workspace.list` | `{ active? }` | workspace list |
 | `workspace.create` | `{ name?, cwd? }` | workspace |
 | `workspace.select` | `{ workspaceId }` | selected workspace |

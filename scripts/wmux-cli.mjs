@@ -26,6 +26,7 @@ function printUsage() {
   wmux ping [--json]
   wmux identify [--json]
   wmux capabilities [--json]
+  wmux config [--json]
   wmux list-workspaces [--json]
   wmux current-workspace [--json]
   wmux new-workspace [--name <name>] [--cwd <path>] [--json]
@@ -303,6 +304,10 @@ function createRequest() {
 
   if (command === "capabilities") {
     return { method: "system.capabilities", params: {} };
+  }
+
+  if (command === "config") {
+    return { method: "config.list", params: {} };
   }
 
   if (command === "list-workspaces") {
@@ -738,6 +743,28 @@ function printResult(result) {
   if (command === "capabilities") {
     for (const method of result?.methods ?? []) {
       console.log(method);
+    }
+    return;
+  }
+
+  if (command === "config") {
+    const sources = result?.sources ?? [];
+    const foundSources = sources.filter((source) => source.found);
+    if (!foundSources.length) {
+      console.log("no project config found");
+    } else {
+      for (const source of foundSources) {
+        const label = source.kind === "global" ? "global" : source.path?.replaceAll("\\", "/").endsWith(".cmux/cmux.json") ? "project .cmux" : "project";
+        console.log(`${label}\t${source.commandCount ?? 0}\t${source.path}`);
+      }
+    }
+    for (const item of result?.config?.commands ?? []) {
+      const source = item.source === "global" ? "global" : item.sourcePath?.replaceAll("\\", "/").endsWith(".cmux/cmux.json") ? "project .cmux" : "project";
+      const type = item.workspace ? "workspace" : "command";
+      console.log(`- ${item.name}\t${type}\t${source}`);
+    }
+    for (const error of result?.errors ?? []) {
+      console.log(`! ${error}`);
     }
     return;
   }

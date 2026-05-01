@@ -93,6 +93,7 @@ export type SocketRpcMethod =
   | "system.ping"
   | "system.identify"
   | "system.capabilities"
+  | "config.list"
   | "workspace.list"
   | "workspace.create"
   | "workspace.select"

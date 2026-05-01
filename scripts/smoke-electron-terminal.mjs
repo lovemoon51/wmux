@@ -690,6 +690,7 @@ async function runCliSocketSmoke(window) {
   for (const method of [
     "system.identify",
     "system.capabilities",
+    "config.list",
     "workspace.create",
     "workspace.select",
     "workspace.close",
@@ -708,6 +709,21 @@ async function runCliSocketSmoke(window) {
     }
   }
   log("ok wmux capabilities");
+
+  const configOutput = await runCliCommand(["config", "--json"]);
+  const config = JSON.parse(configOutput);
+  const configCommands = config?.config?.commands ?? [];
+  if (!configCommands.some((command) => command.name === "Run Global Marker" && command.source === "global")) {
+    throw new Error(`wmux config did not include global command: ${configOutput}`);
+  }
+  if (!configCommands.some((command) => command.name === "Run Smoke Marker" && command.source === "project")) {
+    throw new Error(`wmux config did not include project command: ${configOutput}`);
+  }
+  const configText = await runCliCommand(["config"]);
+  if (!configText.includes("Run Smoke Marker") || !configText.includes(projectConfigPath)) {
+    throw new Error(`wmux config human output was incomplete: ${configText}`);
+  }
+  log("ok wmux config");
 
   const workspaceOutput = await runCliCommand(["list-workspaces"]);
   if (!workspaceOutput.includes("API Server")) {
@@ -1602,6 +1618,10 @@ try {
   }
   if (!fallbackConfig?.sources?.some((source) => source.path === cmuxProjectConfigPath && source.found)) {
     throw new Error(`.cmux/cmux.json fallback source was not reported: ${JSON.stringify(fallbackConfig)}`);
+  }
+  const fallbackCliConfig = JSON.parse(await runCliCommand(["config", "--json"]));
+  if (!fallbackCliConfig.config?.commands?.some((command) => command.name === "Run Cmux Fallback Marker")) {
+    throw new Error(`wmux config did not report .cmux/cmux.json fallback: ${JSON.stringify(fallbackCliConfig)}`);
   }
   writeFileSync(projectConfigPath, projectConfigText, "utf8");
   rmSync(cmuxProjectConfigPath, { force: true });

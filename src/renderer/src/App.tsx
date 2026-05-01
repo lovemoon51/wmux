@@ -806,6 +806,7 @@ const socketCapabilities: SocketRpcMethod[] = [
   "system.ping",
   "system.identify",
   "system.capabilities",
+  "config.list",
   "workspace.list",
   "workspace.create",
   "workspace.select",
@@ -2046,6 +2047,21 @@ export function App(): ReactElement {
             methods: socketCapabilities
           })
         );
+        return;
+      }
+
+      if (request.method === "config.list") {
+        void window.wmux?.config
+          .loadProjectConfig()
+          .then((config) => {
+            setProjectConfig(config);
+            window.wmux?.socket.respond(createSocketSuccessResponse(request.id, config));
+          })
+          .catch((error) => {
+            window.wmux?.socket.respond(
+              createSocketErrorResponse(request.id, "INTERNAL", `读取项目配置失败：${error instanceof Error ? error.message : String(error)}`)
+            );
+          });
         return;
       }
 
