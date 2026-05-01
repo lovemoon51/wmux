@@ -1367,3 +1367,75 @@ kbd {
     max-width: 86px;
   }
 }
+
+/* FindBar：终端搜索条，固定在右上角浮动条 */
+.findBar {
+  position: fixed;
+  top: 16px;
+  right: 24px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: #151a21;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.42);
+  color: var(--text-primary);
+}
+
+.findBarInput {
+  width: 220px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  padding: 4px 6px;
+}
+
+.findBarInput::placeholder {
+  color: var(--text-muted);
+}
+
+.findBarCounter {
+  min-width: 44px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.findBarToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.findBarToggle:hover {
+  background: var(--bg-control);
+  color: var(--text-primary);
+}
+
+.findBarToggleActive {
+  background: var(--accent);
+  color: #0f1115;
+  border-color: var(--accent);
+}
+
+.findBarToggleActive:hover {
+  background: var(--accent);
+  color: #0f1115;
+}

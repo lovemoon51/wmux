@@ -30,6 +30,7 @@ import {
   type PointerEvent,
   type ReactElement
 } from "react";
+import type { SearchAddon } from "@xterm/addon-search";
 import type {
   BrowserClickParams,
   BrowserConsoleEntry,
@@ -91,7 +92,7 @@ import type {
   WorkspaceStatusEvent,
   WorkspaceSummary
 } from "@shared/types";
-import { TerminalSurface } from "./components/TerminalSurface";
+import { TerminalSurface, setTerminalSearchHandlers } from "./components/TerminalSurface";
 
 let nextSurfaceNumber = 1;
 let nextWorkspaceNumber = 1;
@@ -2087,7 +2088,15 @@ export function App(): ReactElement {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [securitySettings, setSecuritySettings] = useState<SocketSecuritySettings | null>(null);
   const [securityModeDraft, setSecurityModeDraft] = useState<SocketSecurityMode>("wmuxOnly");
+  // FindBar 状态：当前活动 workspace 的活动 surface 内搜索
+  const [findBarOpen, setFindBarOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findCaseSensitive, setFindCaseSensitive] = useState(false);
+  const [findRegex, setFindRegex] = useState(false);
+  const [findResultIndex, setFindResultIndex] = useState(-1);
+  const [findResultCount, setFindResultCount] = useState(0);
   const terminalOutputBuffersRef = useRef(new Map<string, string>());
+  const terminalSearchAddonsRef = useRef(new Map<string, SearchAddon>());
 
   useEffect(() => {
     void window.wmux?.getVersion().then(setAppVersion).catch(() => setAppVersion("dev"));
@@ -2333,6 +2342,102 @@ export function App(): ReactElement {
     setCommandQuery("");
     setSelectedCommandIndex(0);
   };
+
+  // FindBar：注册 SearchAddon、打开/关闭、上一个/下一个匹配
+  const handleTerminalSearchReady = useCallback(
+    (surfaceId: string, addon: SearchAddon): (() => void) => {
+      terminalSearchAddonsRef.current.set(surfaceId, addon);
+      // 订阅匹配数变化，更新 FindBar 计数（仅活动 surface 的事件被采纳）
+      const disposable = addon.onDidChangeResults?.((event) => {
+        const activeWorkspaceState =
+          workspacesRef.current.find((workspace) => workspace.id === activeWorkspaceIdRef.current) ??
+          workspacesRef.current[0];
+        const activeSurface = getActiveTerminalSurface(activeWorkspaceState);
+        if (activeSurface?.id !== surfaceId) {
+          return;
+        }
+        setFindResultIndex(event.resultIndex);
+        setFindResultCount(event.resultCount);
+      });
+      return () => {
+        disposable?.dispose();
+        terminalSearchAddonsRef.current.delete(surfaceId);
+      };
+    },
+    []
+  );
+
+  const closeFindBar = useCallback((): void => {
+    setFindBarOpen(false);
+    setFindResultIndex(-1);
+    setFindResultCount(0);
+    // 清除上一次搜索的高亮，避免视觉残留
+    for (const addon of terminalSearchAddonsRef.current.values()) {
+      try {
+        addon.clearDecorations();
+      } catch {
+        // addon 已 dispose
+      }
+    }
+  }, []);
+
+  const openFindBar = useCallback((): void => {
+    setFindBarOpen(true);
+  }, []);
+
+  const findInActiveTerminal = useCallback(
+    (direction: "next" | "previous", query: string): void => {
+      const trimmed = query.trim();
+      if (!trimmed) {
+        setFindResultIndex(-1);
+        setFindResultCount(0);
+        return;
+      }
+      const activeWorkspaceState =
+        workspacesRef.current.find((workspace) => workspace.id === activeWorkspaceIdRef.current) ??
+        workspacesRef.current[0];
+      const activeSurface = getActiveTerminalSurface(activeWorkspaceState);
+      if (!activeSurface) {
+        return;
+      }
+      const addon = terminalSearchAddonsRef.current.get(activeSurface.id);
+      if (!addon) {
+        return;
+      }
+      const options = {
+        caseSensitive: findCaseSensitive,
+        regex: findRegex,
+        decorations: {
+          matchBackground: "#3daee9",
+          matchOverviewRuler: "#3daee9",
+          activeMatchBackground: "#f59e0b",
+          activeMatchColorOverviewRuler: "#f59e0b"
+        }
+      };
+      try {
+        if (direction === "next") {
+          addon.findNext(trimmed, options);
+        } else {
+          addon.findPrevious(trimmed, options);
+        }
+      } catch {
+        // regex 非法或终端已关闭，忽略
+      }
+    },
+    [findCaseSensitive, findRegex]
+  );
+
+  // 把 SearchAddon 注册回调与 FindBar 触发器注入模块级注册表
+  // 由 TerminalSurface 在挂载时直接读取，避免 4 层 prop drilling
+  useEffect(() => {
+    setTerminalSearchHandlers({
+      onSearchReady: handleTerminalSearchReady,
+      onRequestFind: () => openFindBar()
+    });
+    return () => {
+      setTerminalSearchHandlers({});
+    };
+  }, [handleTerminalSearchReady, openFindBar]);
 
   const runSimpleCommand = (command: WmuxCommandConfig): void => {
     if (!command.command) {
@@ -3679,6 +3784,16 @@ export function App(): ReactElement {
         return;
       }
 
+      // Ctrl/Cmd+F：仅当活动 surface 是终端时打开 FindBar；终端聚焦时由 xterm customKeyEventHandler 处理
+      if (isPrimary && !event.altKey && !event.shiftKey && key === "f") {
+        const targetSurface = getActiveTerminalSurface(activeWorkspace);
+        if (targetSurface) {
+          event.preventDefault();
+          openFindBar();
+          return;
+        }
+      }
+
       if (shouldIgnoreGlobalShortcut(event)) {
         return;
       }
@@ -3821,6 +3936,20 @@ export function App(): ReactElement {
         }}
         onRun={runProjectCommand}
         onSelectedIndexChange={setSelectedCommandIndex}
+      />
+      <FindBar
+        isOpen={findBarOpen}
+        query={findQuery}
+        caseSensitive={findCaseSensitive}
+        regex={findRegex}
+        resultIndex={findResultIndex}
+        resultCount={findResultCount}
+        onQueryChange={setFindQuery}
+        onCaseSensitiveChange={setFindCaseSensitive}
+        onRegexChange={setFindRegex}
+        onFindNext={(query) => findInActiveTerminal("next", query)}
+        onFindPrevious={(query) => findInActiveTerminal("previous", query)}
+        onClose={closeFindBar}
       />
       <ProjectCommandConfirmDialog
         confirmation={pendingCommandConfirmation}
@@ -4001,6 +4130,157 @@ function CommandPalette({
           )}
         </div>
       </section>
+    </div>
+  );
+}
+
+function FindBar({
+  isOpen,
+  query,
+  caseSensitive,
+  regex,
+  resultIndex,
+  resultCount,
+  onQueryChange,
+  onCaseSensitiveChange,
+  onRegexChange,
+  onFindNext,
+  onFindPrevious,
+  onClose
+}: {
+  isOpen: boolean;
+  query: string;
+  caseSensitive: boolean;
+  regex: boolean;
+  resultIndex: number;
+  resultCount: number;
+  onQueryChange: (value: string) => void;
+  onCaseSensitiveChange: (value: boolean) => void;
+  onRegexChange: (value: boolean) => void;
+  onFindNext: (query: string) => void;
+  onFindPrevious: (query: string) => void;
+  onClose: () => void;
+}): ReactElement | null {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    window.setTimeout(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }, 0);
+  }, [isOpen]);
+
+  // 输入或选项变化时立即重新查找当前匹配
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    if (query.trim()) {
+      onFindNext(query);
+    }
+    // onFindNext 的引用每次重新生成，但实际行为受 caseSensitive/regex 影响，所以入参覆盖即可
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, query, caseSensitive, regex]);
+
+  if (!isOpen) {
+    return null;
+  }
+
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>): void => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      if (event.shiftKey) {
+        onFindPrevious(query);
+      } else {
+        onFindNext(query);
+      }
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "g") {
+      event.preventDefault();
+      if (event.shiftKey) {
+        onFindPrevious(query);
+      } else {
+        onFindNext(query);
+      }
+    }
+  };
+
+  const counterText = query.trim()
+    ? resultCount > 0
+      ? `${resultIndex + 1}/${resultCount}`
+      : "0/0"
+    : "";
+
+  return (
+    <div className="findBar" role="dialog" aria-label="终端搜索">
+      <Search size={14} />
+      <input
+        ref={inputRef}
+        type="text"
+        className="findBarInput"
+        value={query}
+        placeholder="在终端中查找..."
+        aria-label="终端搜索输入"
+        onChange={(event) => onQueryChange(event.target.value)}
+        onKeyDown={handleKeyDown}
+      />
+      <span className="findBarCounter" aria-live="polite">{counterText}</span>
+      <button
+        type="button"
+        className={`findBarToggle ${caseSensitive ? "findBarToggleActive" : ""}`}
+        title="区分大小写"
+        aria-label="区分大小写"
+        aria-pressed={caseSensitive}
+        onClick={() => onCaseSensitiveChange(!caseSensitive)}
+      >
+        Aa
+      </button>
+      <button
+        type="button"
+        className={`findBarToggle ${regex ? "findBarToggleActive" : ""}`}
+        title="正则表达式"
+        aria-label="正则表达式"
+        aria-pressed={regex}
+        onClick={() => onRegexChange(!regex)}
+      >
+        .*
+      </button>
+      <button
+        type="button"
+        className="iconButton"
+        title="上一个匹配 (Shift+Enter)"
+        aria-label="上一个匹配"
+        onClick={() => onFindPrevious(query)}
+      >
+        <ChevronLeft size={14} />
+      </button>
+      <button
+        type="button"
+        className="iconButton"
+        title="下一个匹配 (Enter)"
+        aria-label="下一个匹配"
+        onClick={() => onFindNext(query)}
+      >
+        <ChevronRight size={14} />
+      </button>
+      <button
+        type="button"
+        className="iconButton"
+        title="关闭 (Esc)"
+        aria-label="关闭搜索"
+        onClick={onClose}
+      >
+        <X size={14} />
+      </button>
     </div>
   );
 }

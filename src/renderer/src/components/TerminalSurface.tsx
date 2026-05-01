@@ -1,5 +1,6 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { LigaturesAddon } from "@xterm/addon-ligatures";
+import { SearchAddon } from "@xterm/addon-search";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm } from "@xterm/xterm";
@@ -11,6 +12,19 @@ import "@xterm/xterm/css/xterm.css";
 // 终端字体栈：优先 Nerd Font 与等宽字体，最终退回 monospace
 const terminalFontStack =
   '"JetBrainsMono Nerd Font", "JetBrains Mono", "Cascadia Code", "Fira Code", "SFMono-Regular", Consolas, monospace';
+
+// 模块级 SearchAddon 注册表：避免 LayoutRenderer/PaneView/SurfaceBody 4 层 prop drilling
+// 由 App.tsx 在挂载时通过 setTerminalSearchHandlers 注入回调
+type TerminalSearchHandlers = {
+  onSearchReady?: (surfaceId: string, addon: SearchAddon) => () => void;
+  onRequestFind?: (surfaceId: string) => void;
+};
+const terminalSearchHandlers: TerminalSearchHandlers = {};
+
+export function setTerminalSearchHandlers(handlers: TerminalSearchHandlers): void {
+  terminalSearchHandlers.onSearchReady = handlers.onSearchReady;
+  terminalSearchHandlers.onRequestFind = handlers.onRequestFind;
+}
 
 // URL 识别正则：兼容 smoke dispatchEvent 模拟点击的 DOM 路径
 const terminalUrlPattern = /https?:\/\/[^\s"'<>]+/gi;
@@ -123,8 +137,28 @@ export function TerminalSurface({
     terminal.loadAddon(unicode11Addon);
     terminal.unicode.activeVersion = "11";
 
+    // Search：暴露给父级管理 FindBar 操作
+    const searchAddon = new SearchAddon();
+    terminal.loadAddon(searchAddon);
+
+    // Ctrl/Cmd+F 拦截：在 xterm 处理 keystroke 之前打开 FindBar
+    terminal.attachCustomKeyEventHandler((event) => {
+      if (event.type !== "keydown") {
+        return true;
+      }
+      const isPrimary = event.ctrlKey || event.metaKey;
+      if (isPrimary && !event.altKey && event.key.toLowerCase() === "f") {
+        terminalSearchHandlers.onRequestFind?.(surface.id);
+        return false;
+      }
+      return true;
+    });
+
     terminal.open(host);
     terminal.focus();
+
+    // 注册 SearchAddon 到父级 ref Map，cleanup 时注销
+    const releaseSearch = terminalSearchHandlers.onSearchReady?.(surface.id, searchAddon);
 
     // Smoke 模式禁用 WebGL/Ligatures：自动化用 textContent 断言，Canvas 渲染不入 DOM
     const smokeMode = window.wmux?.isSmokeMode?.() ?? false;
@@ -339,6 +373,8 @@ export function TerminalSurface({
       inputDisposable.dispose();
       selectionChangeDisposable.dispose();
       linkProviderDisposable.dispose();
+      releaseSearch?.();
+      searchAddon.dispose();
       ligaturesAddon?.dispose();
       webglAddon?.dispose();
       removeDataListener?.();
