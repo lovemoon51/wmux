@@ -7,6 +7,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 const args = process.argv.slice(2);
 const command = args[0];
 const jsonOutput = args.includes("--json");
+const helpRequested = command === "--help" || command === "-h" || command === "help";
 
 function getDefaultSocketPath() {
   if (process.env.WMUX_SOCKET_PATH) {
@@ -21,21 +22,27 @@ function getDefaultSocketPath() {
 }
 
 function printUsage() {
-  console.error(`用法：
+  console.log(`用法：
   wmux ping [--json]
   wmux identify [--json]
   wmux capabilities [--json]
   wmux list-workspaces [--json]
+  wmux current-workspace [--json]
   wmux new-workspace [--name <name>] [--cwd <path>] [--json]
   wmux select-workspace --workspace <id> [--json]
   wmux close-workspace --workspace <id> [--json]
   wmux rename-workspace --workspace <id> --name <name> [--json]
   wmux new-terminal [--pane <id>] [--name <name>] [--cwd <path>] [--json]
   wmux new-browser [--pane <id>] [--name <name>] [--url <url>] [--json]
+  wmux new-split --direction horizontal|vertical [--json]
   wmux surface list [--workspace <id>] [--json]
   wmux surface focus --surface <id> [--json]
+  wmux list-surfaces [--workspace <id>] [--json]
+  wmux focus-surface --surface <id> [--json]
   wmux send <text> [--json]
   wmux send-key <key> [--surface <id>] [--json]
+  wmux send-surface --surface <id> <text> [--json]
+  wmux send-key-surface --surface <id> <key> [--json]
   wmux notify --title <title> [--body <body>] [--json]
   wmux clear-status [--workspace <id>] [--json]
   wmux status list [--workspace <id>] [--json]
@@ -53,6 +60,14 @@ function printUsage() {
 function cliError(message) {
   const error = new Error(message);
   error.cliExitCode = 2;
+  return error;
+}
+
+function commandError(code, message, details = {}) {
+  const error = new Error(message);
+  error.code = code;
+  error.details = details;
+  error.cliExitCode = 1;
   return error;
 }
 
@@ -79,6 +94,41 @@ function readOutputPath() {
 
 function hasFlag(name) {
   return args.includes(name);
+}
+
+const optionFlagsWithValues = new Set([
+  "--body",
+  "--cwd",
+  "--direction",
+  "--format",
+  "--load-wait",
+  "--name",
+  "--out",
+  "--pane",
+  "--selector",
+  "--surface",
+  "--text",
+  "--text-file",
+  "--timeout",
+  "--title",
+  "--url",
+  "--wait",
+  "--workspace"
+]);
+
+function readFirstPositionalAfterCommand() {
+  for (let index = 1; index < args.length; index += 1) {
+    const item = args[index];
+    if (item.startsWith("--")) {
+      if (optionFlagsWithValues.has(item)) {
+        index += 1;
+      }
+      continue;
+    }
+    return item;
+  }
+
+  return undefined;
 }
 
 function readTimeout() {
@@ -239,6 +289,10 @@ function createBrowserRequest() {
 }
 
 function createRequest() {
+  if (helpRequested) {
+    return undefined;
+  }
+
   if (command === "ping") {
     return { method: "system.ping", params: {} };
   }
@@ -253,6 +307,10 @@ function createRequest() {
 
   if (command === "list-workspaces") {
     return { method: "workspace.list", params: {} };
+  }
+
+  if (command === "current-workspace") {
+    return { method: "workspace.list", params: { active: true } };
   }
 
   if (command === "new-workspace") {
@@ -363,8 +421,21 @@ function createRequest() {
     };
   }
 
-  if (command === "surface") {
-    const surfaceCommand = args[1];
+  if (command === "new-split") {
+    const direction = parseOption("--direction");
+    if (direction !== "horizontal" && direction !== "vertical") {
+      throw cliError("new-split 需要 --direction horizontal|vertical");
+    }
+    return {
+      method: "surface.split",
+      params: {
+        direction
+      }
+    };
+  }
+
+  if (command === "surface" || command === "list-surfaces" || command === "focus-surface") {
+    const surfaceCommand = command === "list-surfaces" ? "list" : command === "focus-surface" ? "focus" : args[1];
 
     if (surfaceCommand === "list") {
       return {
@@ -411,6 +482,38 @@ function createRequest() {
       params: {
         key,
         ...(parseOption("--surface") ? { surfaceId: parseOption("--surface") } : {})
+      }
+    };
+  }
+
+  if (command === "send-surface") {
+    const surfaceId = parseOption("--surface");
+    const text = readFirstPositionalAfterCommand();
+    if (!surfaceId || surfaceId.startsWith("--")) {
+      throw cliError("send-surface 需要 --surface <id>");
+    }
+    if (typeof text !== "string") {
+      throw cliError("send-surface 需要文本参数");
+    }
+
+    return { method: "surface.sendText", params: { surfaceId, text: text.replaceAll("\\n", "\n") } };
+  }
+
+  if (command === "send-key-surface") {
+    const surfaceId = parseOption("--surface");
+    const key = readFirstPositionalAfterCommand();
+    if (!surfaceId || surfaceId.startsWith("--")) {
+      throw cliError("send-key-surface 需要 --surface <id>");
+    }
+    if (!key || key.startsWith("--")) {
+      throw cliError("send-key-surface 需要 key 参数");
+    }
+
+    return {
+      method: "surface.sendKey",
+      params: {
+        surfaceId,
+        key
       }
     };
   }
@@ -596,6 +699,19 @@ function printErrorHint(error) {
 }
 
 function printResult(result) {
+  if (command === "current-workspace") {
+    const workspace = result?.workspaces?.find((item) => item.active) ?? result?.workspaces?.[0];
+    if (!workspace) {
+      throw commandError("NOT_FOUND", "找不到 active workspace");
+    }
+    if (jsonOutput) {
+      console.log(JSON.stringify(workspace, null, 2));
+      return;
+    }
+    console.log(`${workspace.id}\t${workspace.name}\t${workspace.status}\t${workspace.cwd}`);
+    return;
+  }
+
   if (jsonOutput) {
     console.log(JSON.stringify(result, null, 2));
     return;
@@ -665,8 +781,14 @@ function printResult(result) {
     return;
   }
 
-  if (command === "surface") {
-    if (args[1] === "focus") {
+  if (command === "new-split") {
+    console.log(`split ${result?.paneId ?? "pane"} ${result?.surfaceId ?? result?.surface?.id ?? "surface"}`);
+    return;
+  }
+
+  if (command === "surface" || command === "list-surfaces" || command === "focus-surface") {
+    const surfaceCommand = command === "list-surfaces" ? "list" : command === "focus-surface" ? "focus" : args[1];
+    if (surfaceCommand === "focus") {
       console.log(`focused ${result?.surfaceId ?? "surface"}`);
       return;
     }
@@ -681,12 +803,12 @@ function printResult(result) {
     return;
   }
 
-  if (command === "send") {
+  if (command === "send" || command === "send-surface") {
     console.log(`sent ${result?.bytes ?? 0} bytes to ${result?.surfaceId ?? "terminal"}`);
     return;
   }
 
-  if (command === "send-key") {
+  if (command === "send-key" || command === "send-key-surface") {
     console.log(`sent key ${result?.key ?? ""} to ${result?.surfaceId ?? "terminal"}`);
     return;
   }
@@ -711,11 +833,20 @@ function printResult(result) {
 }
 
 try {
+  if (helpRequested) {
+    printUsage();
+    process.exit(0);
+  }
+
   const payload = createRequest();
+  if (!payload) {
+    printUsage();
+    process.exit(0);
+  }
   const result = await requestSocket(payload);
   printResult(result);
 } catch (error) {
-  printUsage();
+  console.error("运行失败：");
   if (error?.code) {
     console.error(error.code);
   }

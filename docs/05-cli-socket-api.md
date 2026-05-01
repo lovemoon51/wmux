@@ -71,6 +71,10 @@ wmux split right
 wmux split down
 wmux surface focus --surface surface:2
 wmux close-surface --surface surface:2
+wmux current-workspace
+wmux list-surfaces
+wmux focus-surface --surface surface:2
+wmux new-split --direction vertical
 ```
 
 ### 输入
@@ -78,6 +82,8 @@ wmux close-surface --surface surface:2
 ```bash
 wmux send "npm test\n"
 wmux send-key enter
+wmux send-surface --surface surface:2 "npm test\n"
+wmux send-key-surface --surface surface:2 enter
 wmux paste
 ```
 
@@ -113,7 +119,7 @@ wmux browser errors list --surface surface:3
 | `system.ping` | `{}` | `{ pong: true }` |
 | `system.identify` | `{}` | active ids |
 | `system.capabilities` | `{}` | method list |
-| `workspace.list` | `{}` | workspace list |
+| `workspace.list` | `{ active? }` | workspace list |
 | `workspace.create` | `{ name?, cwd? }` | workspace |
 | `workspace.select` | `{ workspaceId }` | selected workspace |
 | `workspace.close` | `{ workspaceId }` | closed workspace |
@@ -121,7 +127,7 @@ wmux browser errors list --surface surface:3
 | `surface.list` | `{ workspaceId? }` | surface list |
 | `surface.createTerminal` | `{ paneId?, name?, cwd?, command? }` | surface |
 | `surface.createBrowser` | `{ paneId?, name?, url? }` | surface |
-| `surface.split` | `{ direction, surfaceId? }` | pane/surface ids |
+| `surface.split` | `{ direction }` | pane/surface ids |
 | `surface.focus` | `{ surfaceId }` | selected surface ids |
 | `surface.sendText` | `{ surfaceId?, text }` | ok |
 | `surface.sendKey` | `{ surfaceId?, key }` | ok |

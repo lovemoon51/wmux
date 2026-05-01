@@ -626,6 +626,18 @@ async function runCliCommand(args) {
   return `${stdout}${stderr}`.trim();
 }
 
+async function runCliCommandWithStatus(args) {
+  try {
+    const output = await runCliCommand(args);
+    return { code: 0, output };
+  } catch (error) {
+    return {
+      code: error.code,
+      output: `${error.stdout ?? ""}${error.stderr ?? ""}`.trim()
+    };
+  }
+}
+
 async function runCliCommandFailure(args) {
   try {
     await runCliCommand(args);
@@ -641,6 +653,13 @@ async function runCliCommandFailure(args) {
 
 async function runCliSocketSmoke(window) {
   log("cli socket");
+
+  const helpOutput = await runCliCommandWithStatus(["--help"]);
+  const helpAliasOutput = await runCliCommandWithStatus(["help"]);
+  if (helpOutput.code !== 0 || helpAliasOutput.code !== 0 || !helpOutput.output.includes("wmux current-workspace")) {
+    throw new Error(`wmux help did not exit cleanly: ${JSON.stringify({ helpOutput, helpAliasOutput })}`);
+  }
+  log("ok wmux help");
 
   const pingOutput = await runCliCommand(["ping"]);
   if (!pingOutput.includes("pong")) {
@@ -684,6 +703,17 @@ async function runCliSocketSmoke(window) {
     throw new Error(`wmux list-workspaces did not include API Server: ${workspaceOutput}`);
   }
   log("ok wmux list-workspaces");
+
+  const currentWorkspaceOutput = await runCliCommand(["current-workspace", "--json"]);
+  const currentWorkspace = JSON.parse(currentWorkspaceOutput);
+  if (currentWorkspace.id !== "workspace-api" || !currentWorkspace.active) {
+    throw new Error(`wmux current-workspace did not return active API Server: ${currentWorkspaceOutput}`);
+  }
+  const currentWorkspaceText = await runCliCommand(["current-workspace"]);
+  if (!currentWorkspaceText.includes("workspace-api") || !currentWorkspaceText.includes("API Server")) {
+    throw new Error(`wmux current-workspace human output was incomplete: ${currentWorkspaceText}`);
+  }
+  log("ok wmux current-workspace");
 
   const createWorkspaceOutput = await runCliCommand(["new-workspace", "--name", "CLI Create Smoke", "--cwd", "."]);
   if (!createWorkspaceOutput.includes("created CLI Create Smoke")) {
@@ -774,6 +804,11 @@ async function runCliSocketSmoke(window) {
   if (!surfaceList.surfaces?.some((surface) => surface.surfaceId === "surface-agent" && surface.active)) {
     throw new Error(`wmux surface list --json did not include active surface-agent: ${surfaceJsonOutput}`);
   }
+  const listSurfacesOutput = await runCliCommand(["list-surfaces", "--json"]);
+  const listSurfaces = JSON.parse(listSurfacesOutput);
+  if (!listSurfaces.surfaces?.some((surface) => surface.surfaceId === "surface-agent" && surface.active)) {
+    throw new Error(`wmux list-surfaces alias did not include active surface-agent: ${listSurfacesOutput}`);
+  }
   log("ok wmux surface list");
 
   const focusShellOutput = await runCliCommand(["surface", "focus", "--surface", "surface-shell"]);
@@ -794,6 +829,11 @@ async function runCliSocketSmoke(window) {
   if (focusedAgent.surfaceId !== "surface-agent" || focusedAgent.paneId !== "pane-terminal") {
     throw new Error(`wmux surface focus did not restore surface-agent: ${focusedAgentOutput}`);
   }
+  const focusSurfaceAliasOutput = await runCliCommand(["focus-surface", "--surface", "surface-shell"]);
+  if (!focusSurfaceAliasOutput.includes("focused surface-shell")) {
+    throw new Error(`wmux focus-surface alias did not report focused surface-shell: ${focusSurfaceAliasOutput}`);
+  }
+  await runCliCommand(["focus-surface", "--surface", "surface-agent"]);
   log("ok wmux surface focus");
 
   const createTerminalOutput = await runCliCommand(["new-terminal", "--name", "CLI Terminal Smoke", "--cwd", "."]);
@@ -851,6 +891,21 @@ async function runCliSocketSmoke(window) {
   await runCliCommand(["surface", "focus", "--surface", "surface-agent"]);
   log("ok wmux new-browser");
 
+  const directedBrowserSendFailure = await runCliCommandFailure([
+    "send-surface",
+    "--surface",
+    createdBrowser.surfaceId,
+    "Write-Output WMUX_SHOULD_NOT_SEND\n"
+  ]);
+  if (directedBrowserSendFailure.code !== 1 || !directedBrowserSendFailure.output.includes("SURFACE_TYPE_MISMATCH")) {
+    throw new Error(`wmux send-surface to browser did not fail clearly: ${JSON.stringify(directedBrowserSendFailure)}`);
+  }
+  const directedMissingSendFailure = await runCliCommandFailure(["send-surface", "--surface", "surface-missing", "hello"]);
+  if (directedMissingSendFailure.code !== 1 || !directedMissingSendFailure.output.includes("NOT_FOUND")) {
+    throw new Error(`wmux send-surface missing surface did not fail clearly: ${JSON.stringify(directedMissingSendFailure)}`);
+  }
+  log("ok wmux send-surface errors");
+
   await window.locator('button.surfaceTab[aria-label="Codex Agent"]').click();
   await window.waitForSelector(".paneActive .surfaceBodyFrameActive .terminalHost .xterm textarea", {
     state: "attached",
@@ -865,6 +920,15 @@ async function runCliSocketSmoke(window) {
   });
   log("ok wmux send");
 
+  const sendSurfaceOutput = await runCliCommand(["send-surface", "--surface", "surface-agent", "Write-Output WMUX_CLI_SEND_SURFACE\n"]);
+  if (!sendSurfaceOutput.includes("sent")) {
+    throw new Error(`wmux send-surface did not report sent bytes: ${sendSurfaceOutput}`);
+  }
+  await window.waitForFunction(() => document.body.textContent?.includes("WMUX_CLI_SEND_SURFACE"), null, {
+    timeout: 15_000
+  });
+  log("ok wmux send-surface");
+
   const sendKeyText = "Write-Output WMUX_CLI_SEND_KEY";
   const sendKeyTextOutput = await runCliCommand(["send", sendKeyText]);
   if (!sendKeyTextOutput.includes("sent")) {
@@ -878,6 +942,42 @@ async function runCliSocketSmoke(window) {
     timeout: 15_000
   });
   log("ok wmux send-key");
+
+  const sendKeySurfaceText = "Write-Output WMUX_CLI_SEND_KEY_SURFACE";
+  await runCliCommand(["send-surface", "--surface", "surface-agent", sendKeySurfaceText]);
+  const sendKeySurfaceOutput = await runCliCommand(["send-key-surface", "--surface", "surface-agent", "enter"]);
+  if (!sendKeySurfaceOutput.includes("sent key enter")) {
+    throw new Error(`wmux send-key-surface did not report sent key: ${sendKeySurfaceOutput}`);
+  }
+  await window.waitForFunction(() => document.body.textContent?.includes("WMUX_CLI_SEND_KEY_SURFACE"), null, {
+    timeout: 15_000
+  });
+  log("ok wmux send-key-surface");
+
+  const invalidSplitOutput = await runCliCommandFailure(["new-split", "--direction", "diagonal"]);
+  if (invalidSplitOutput.code !== 2 || !invalidSplitOutput.output.includes("new-split 需要 --direction")) {
+    throw new Error(`wmux new-split invalid direction was not a CLI usage error: ${JSON.stringify(invalidSplitOutput)}`);
+  }
+  const paneCountBeforeCliSplit = await window.locator(".pane").count();
+  const splitOutput = await runCliCommand(["new-split", "--direction", "vertical", "--json"]);
+  const splitResult = JSON.parse(splitOutput);
+  if (splitResult.workspaceId !== "workspace-api" || !splitResult.paneId || !splitResult.surfaceId) {
+    throw new Error(`wmux new-split did not report split: ${splitOutput}`);
+  }
+  await window.waitForFunction((count) => document.querySelectorAll(".pane").length === count + 1, paneCountBeforeCliSplit, {
+    timeout: 15_000
+  });
+  const splitIdentifyOutput = await runCliCommand(["identify", "--json"]);
+  const splitIdentify = JSON.parse(splitIdentifyOutput);
+  if (splitIdentify.surfaceType !== "terminal" || splitIdentify.workspaceId !== "workspace-api") {
+    throw new Error(`wmux new-split did not activate a terminal surface: ${splitIdentifyOutput}`);
+  }
+  await window.locator(".paneActive").getByLabel("Close pane").click();
+  await window.waitForFunction((count) => document.querySelectorAll(".pane").length === count, paneCountBeforeCliSplit, {
+    timeout: 15_000
+  });
+  await runCliCommand(["focus-surface", "--surface", "surface-agent"]);
+  log("ok wmux new-split");
 
   await window.getByRole("button", { name: /Notifications/ }).click();
   await window.getByLabel("Notifications panel").waitFor({ timeout: 15_000 });

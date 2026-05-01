@@ -64,6 +64,7 @@ import type {
   SurfaceCreateTerminalParams,
   SurfaceFocusParams,
   SurfaceListParams,
+  SurfaceSplitParams,
   SurfaceSummary,
   WmuxCommandConfig,
   WmuxLayoutConfig,
@@ -73,6 +74,7 @@ import type {
   WorkspaceCloseParams,
   WorkspaceCreateParams,
   WorkspaceInspection,
+  WorkspaceListParams,
   WorkspaceRenameParams,
   WorkspaceSelectParams,
   WorkspaceStatus,
@@ -751,6 +753,22 @@ function getActiveTerminalSurface(workspace: Workspace, preferredSurfaceId?: str
   return fallbackSurfaceId ? workspace.surfaces[fallbackSurfaceId] : null;
 }
 
+function findSurfaceById(workspaces: Workspace[], surfaceId: string): { workspace: Workspace; paneId: string; surface: Surface } | null {
+  for (const workspace of workspaces) {
+    const surface = workspace.surfaces[surfaceId];
+    if (!surface) {
+      continue;
+    }
+
+    const pane = Object.values(workspace.panes).find((item) => item.surfaceIds.includes(surface.id));
+    if (pane) {
+      return { workspace, paneId: pane.id, surface };
+    }
+  }
+
+  return null;
+}
+
 const terminalKeySequences: Record<string, string> = {
   enter: "\r",
   return: "\r",
@@ -796,6 +814,7 @@ const socketCapabilities: SocketRpcMethod[] = [
   "surface.list",
   "surface.createTerminal",
   "surface.createBrowser",
+  "surface.split",
   "surface.focus",
   "surface.sendText",
   "surface.sendKey",
@@ -2027,9 +2046,11 @@ export function App(): ReactElement {
       }
 
       if (request.method === "workspace.list") {
+        const params = (request.params ?? {}) as Partial<WorkspaceListParams>;
+        const summaries = createWorkspaceSummaries(currentWorkspaces, currentActiveWorkspaceId);
         window.wmux?.socket.respond(
           createSocketSuccessResponse(request.id, {
-            workspaces: createWorkspaceSummaries(currentWorkspaces, currentActiveWorkspaceId)
+            workspaces: params.active ? summaries.filter((workspace) => workspace.active) : summaries
           })
         );
         return;
@@ -2260,6 +2281,7 @@ export function App(): ReactElement {
           createSocketSuccessResponse(request.id, {
             workspaceId: currentWorkspace.id,
             paneId,
+            surfaceId: surface.id,
             surface
           })
         );
@@ -2327,6 +2349,48 @@ export function App(): ReactElement {
           createSocketSuccessResponse(request.id, {
             workspaceId: currentWorkspace.id,
             paneId,
+            surfaceId: surface.id,
+            surface
+          })
+        );
+        return;
+      }
+
+      if (request.method === "surface.split") {
+        const params = (request.params ?? {}) as Partial<SurfaceSplitParams>;
+        if (params.direction !== "horizontal" && params.direction !== "vertical") {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "BAD_REQUEST", "surface.split 需要 direction=horizontal|vertical")
+          );
+          return;
+        }
+
+        const paneIdToSplit = currentWorkspace.activePaneId;
+        const { paneId, pane, surface } = createPaneWithTerminal();
+        setWorkspaces((items) =>
+          items.map((workspace) =>
+            workspace.id === currentWorkspace.id
+              ? {
+                  ...workspace,
+                  activePaneId: paneId,
+                  layout: splitPaneNode(workspace.layout, paneIdToSplit, params.direction as "horizontal" | "vertical", paneId),
+                  panes: {
+                    ...workspace.panes,
+                    [paneId]: pane
+                  },
+                  surfaces: {
+                    ...workspace.surfaces,
+                    [surface.id]: surface
+                  }
+                }
+              : workspace
+          )
+        );
+        window.wmux?.socket.respond(
+          createSocketSuccessResponse(request.id, {
+            workspaceId: currentWorkspace.id,
+            paneId,
+            surfaceId: surface.id,
             surface
           })
         );
@@ -2340,24 +2404,7 @@ export function App(): ReactElement {
           return;
         }
 
-        let target:
-          | {
-              workspace: Workspace;
-              paneId: string;
-              surface: Surface;
-            }
-          | undefined;
-        for (const workspace of currentWorkspaces) {
-          const surface = workspace.surfaces[params.surfaceId];
-          if (!surface) {
-            continue;
-          }
-          const pane = Object.values(workspace.panes).find((item) => item.surfaceIds.includes(surface.id));
-          if (pane) {
-            target = { workspace, paneId: pane.id, surface };
-            break;
-          }
-        }
+        const target = findSurfaceById(currentWorkspaces, params.surfaceId);
 
         if (!target) {
           window.wmux?.socket.respond(
@@ -2413,6 +2460,24 @@ export function App(): ReactElement {
 
         const terminalSurface = getActiveTerminalSurface(currentWorkspace, params.surfaceId);
         if (!terminalSurface) {
+          if (params.surfaceId) {
+            const target = findSurfaceById(currentWorkspaces, params.surfaceId);
+            if (!target) {
+              window.wmux?.socket.respond(
+                createSocketErrorResponse(request.id, "NOT_FOUND", "找不到 surface", {
+                  surfaceId: params.surfaceId
+                })
+              );
+              return;
+            }
+            window.wmux?.socket.respond(
+              createSocketErrorResponse(request.id, "SURFACE_TYPE_MISMATCH", "指定 surface 不是 terminal", {
+                surfaceId: params.surfaceId,
+                surfaceType: target.surface.type
+              })
+            );
+            return;
+          }
           window.wmux?.socket.respond(createSocketErrorResponse(request.id, "NOT_FOUND", "当前 workspace 没有 terminal surface"));
           return;
         }
@@ -2447,6 +2512,24 @@ export function App(): ReactElement {
 
         const terminalSurface = getActiveTerminalSurface(currentWorkspace, params.surfaceId);
         if (!terminalSurface) {
+          if (params.surfaceId) {
+            const target = findSurfaceById(currentWorkspaces, params.surfaceId);
+            if (!target) {
+              window.wmux?.socket.respond(
+                createSocketErrorResponse(request.id, "NOT_FOUND", "找不到 surface", {
+                  surfaceId: params.surfaceId
+                })
+              );
+              return;
+            }
+            window.wmux?.socket.respond(
+              createSocketErrorResponse(request.id, "SURFACE_TYPE_MISMATCH", "指定 surface 不是 terminal", {
+                surfaceId: params.surfaceId,
+                surfaceType: target.surface.type
+              })
+            );
+            return;
+          }
           window.wmux?.socket.respond(createSocketErrorResponse(request.id, "NOT_FOUND", "当前 workspace 没有 terminal surface"));
           return;
         }

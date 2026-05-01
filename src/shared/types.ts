@@ -100,6 +100,7 @@ export type SocketRpcMethod =
   | "surface.list"
   | "surface.createTerminal"
   | "surface.createBrowser"
+  | "surface.split"
   | "surface.focus"
   | "surface.sendText"
   | "surface.sendKey"
@@ -210,6 +211,10 @@ export type WorkspaceRenameParams = {
   name: string;
 };
 
+export type WorkspaceListParams = {
+  active?: boolean;
+};
+
 export type SurfaceListParams = {
   workspaceId?: string;
 };
@@ -228,6 +233,10 @@ export type SurfaceCreateBrowserParams = {
 
 export type SurfaceFocusParams = {
   surfaceId: string;
+};
+
+export type SurfaceSplitParams = {
+  direction: "horizontal" | "vertical";
 };
 
 export type SurfaceSummary = {

@@ -47,6 +47,17 @@ wmux browser screenshot --surface <surfaceId> --out output/playwright/browser.pn
 
 当当前 workspace 有多个 browser surface 时，先用 `wmux browser list` 找到目标 `surfaceId`，再把 `--surface <surfaceId>` 加到后续命令里。
 
+## CLI/API 兼容示例
+
+```bash
+wmux current-workspace
+wmux list-surfaces
+wmux focus-surface --surface <surfaceId>
+wmux send-surface --surface <surfaceId> "npm test\n"
+wmux send-key-surface --surface <surfaceId> enter
+wmux new-split --direction vertical
+```
+
 ## Terminal Link
 
 wmux terminal 中出现的 `http://` / `https://` 链接可以点击打开到当前 workspace 的内置 browser surface。若当前 workspace 没有可用 browser surface，wmux 会在当前 pane 创建一个。
