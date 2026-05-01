@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { registerPtyIpc } from "./pty/ptyManager";
 import {
@@ -21,6 +21,8 @@ import type {
   SocketRpcRequest,
   SocketRpcResponse,
   WmuxCommandConfig,
+  WmuxConfigSource,
+  WmuxConfigSourceKind,
   WmuxLayoutConfig,
   WmuxProjectConfig,
   WmuxProjectConfigResult,
@@ -96,6 +98,19 @@ function readConfiguredSocketSecurityMode(): SocketSecurityMode | undefined {
 async function writeConfiguredSocketSecurityMode(mode: SocketSecurityMode): Promise<void> {
   await mkdir(app.getPath("userData"), { recursive: true });
   await writeFile(getSettingsPath(), `${JSON.stringify({ socketSecurityMode: mode }, null, 2)}\n`, "utf8");
+}
+
+function getGlobalConfigPath(): string {
+  const override = process.env.WMUX_GLOBAL_CONFIG_PATH;
+  if (override) {
+    return resolve(override);
+  }
+
+  if (process.platform === "win32") {
+    return join(process.env.APPDATA || join(homedir(), "AppData", "Roaming"), "wmux", "wmux.json");
+  }
+
+  return join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "wmux", "wmux.json");
 }
 
 function getSocketSecuritySettings(configuredMode = readConfiguredSocketSecurityMode() ?? socketSecurityMode): SocketSecuritySettings {
@@ -233,7 +248,12 @@ function parseWorkspaceCommandConfig(
   return workspace;
 }
 
-function parseCommandConfig(value: unknown, errors: string[], index: number): WmuxCommandConfig | null {
+function parseCommandConfig(
+  value: unknown,
+  errors: string[],
+  index: number,
+  source: { kind: WmuxConfigSourceKind; path: string }
+): WmuxCommandConfig | null {
   const context = `commands[${index}]`;
   if (!isRecord(value)) {
     errors.push(`${context} 必须是对象`);
@@ -261,11 +281,16 @@ function parseCommandConfig(value: unknown, errors: string[], index: number): Wm
       value.restart === "ignore" || value.restart === "recreate" || value.restart === "confirm" ? value.restart : undefined,
     command: commandText,
     confirm: readOptionalBoolean(value, "confirm"),
-    workspace: workspace ?? undefined
+    workspace: workspace ?? undefined,
+    source: source.kind,
+    sourcePath: source.path
   };
 }
 
-function parseProjectConfig(value: unknown): { config: WmuxProjectConfig; errors: string[] } {
+function parseProjectConfig(
+  value: unknown,
+  source: { kind: WmuxConfigSourceKind; path: string }
+): { config: WmuxProjectConfig; errors: string[] } {
   const errors: string[] = [];
   if (!isRecord(value)) {
     return { config: { commands: [] }, errors: ["wmux.json 根节点必须是对象"] };
@@ -276,7 +301,7 @@ function parseProjectConfig(value: unknown): { config: WmuxProjectConfig; errors
   }
 
   const commands = value.commands
-    .map((command, index) => parseCommandConfig(command, errors, index))
+    .map((command, index) => parseCommandConfig(command, errors, index, source))
     .filter((command): command is WmuxCommandConfig => Boolean(command));
 
   return { config: { commands }, errors };
@@ -393,36 +418,75 @@ async function findProcessIdsForCwd(cwd: string, pids: number[]): Promise<number
   return [...matchedPids];
 }
 
-async function loadProjectConfig(): Promise<WmuxProjectConfigResult> {
-  const configPath = join(process.cwd(), "wmux.json");
+async function readWmuxConfigSource(
+  kind: WmuxConfigSourceKind,
+  configPath: string
+): Promise<{ source: WmuxConfigSource; config: WmuxProjectConfig }> {
+  const missingConfig = { commands: [] };
 
   try {
     const rawConfig = await readFile(configPath, "utf8");
-    const parsedConfig = parseProjectConfig(JSON.parse(rawConfig));
+    const parsedConfig = parseProjectConfig(JSON.parse(rawConfig), { kind, path: configPath });
     return {
-      path: configPath,
-      found: true,
-      config: parsedConfig.config,
-      errors: parsedConfig.errors
+      source: {
+        kind,
+        path: configPath,
+        found: true,
+        commandCount: parsedConfig.config.commands.length,
+        errors: parsedConfig.errors
+      },
+      config: parsedConfig.config
     };
   } catch (error) {
     const nodeError = error as NodeJS.ErrnoException;
     if (nodeError.code === "ENOENT") {
       return {
-        path: configPath,
-        found: false,
-        config: { commands: [] },
-        errors: []
+        source: {
+          kind,
+          path: configPath,
+          found: false,
+          commandCount: 0,
+          errors: []
+        },
+        config: missingConfig
       };
     }
 
     return {
-      path: configPath,
-      found: true,
-      config: { commands: [] },
-      errors: [`读取 wmux.json 失败：${error instanceof Error ? error.message : String(error)}`]
+      source: {
+        kind,
+        path: configPath,
+        found: true,
+        commandCount: 0,
+        errors: [`读取 ${configPath} 失败：${error instanceof Error ? error.message : String(error)}`]
+      },
+      config: missingConfig
     };
   }
+}
+
+function mergeWmuxCommands(globalCommands: WmuxCommandConfig[], projectCommands: WmuxCommandConfig[]): WmuxCommandConfig[] {
+  const projectCommandNames = new Set(projectCommands.map((command) => command.name));
+  return [...globalCommands.filter((command) => !projectCommandNames.has(command.name)), ...projectCommands];
+}
+
+async function loadProjectConfig(): Promise<WmuxProjectConfigResult> {
+  const projectConfigPath = join(process.cwd(), "wmux.json");
+  const globalConfigPath = getGlobalConfigPath();
+  const [globalResult, projectResult] = await Promise.all([
+    readWmuxConfigSource("global", globalConfigPath),
+    readWmuxConfigSource("project", projectConfigPath)
+  ]);
+  const sources = [globalResult.source, projectResult.source];
+  const commands = mergeWmuxCommands(globalResult.config.commands, projectResult.config.commands);
+
+  return {
+    path: projectConfigPath,
+    found: sources.some((source) => source.found),
+    config: { commands },
+    errors: sources.flatMap((source) => source.errors),
+    sources
+  };
 }
 
 function dispatchSocketRequestToRenderer(request: SocketRpcRequest): Promise<unknown> {

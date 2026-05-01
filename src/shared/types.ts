@@ -13,6 +13,8 @@ export type SocketSecuritySettings = {
   warning?: string;
 };
 
+export type WmuxConfigSourceKind = "global" | "project";
+
 export type WmuxSurfaceConfig =
   | {
       type: "terminal";
@@ -56,10 +58,20 @@ export type WmuxCommandConfig = {
   command?: string;
   confirm?: boolean;
   workspace?: WmuxWorkspaceCommandConfig;
+  source?: WmuxConfigSourceKind;
+  sourcePath?: string;
 };
 
 export type WmuxProjectConfig = {
   commands: WmuxCommandConfig[];
+};
+
+export type WmuxConfigSource = {
+  kind: WmuxConfigSourceKind;
+  path: string;
+  found: boolean;
+  commandCount: number;
+  errors: string[];
 };
 
 export type WmuxProjectConfigResult = {
@@ -67,6 +79,7 @@ export type WmuxProjectConfigResult = {
   found: boolean;
   config: WmuxProjectConfig;
   errors: string[];
+  sources?: WmuxConfigSource[];
 };
 
 export type WorkspaceInspection = {

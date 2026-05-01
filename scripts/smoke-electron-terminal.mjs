@@ -13,6 +13,7 @@ const smokeWorkspaceStatePath = resolve(smokeUserDataPath, "workspace-state.json
 const smokeSocketPath = process.platform === "win32" ? "\\\\.\\pipe\\wmux-smoke" : resolve("output/playwright/wmux-smoke.sock");
 const smokeSocketToken = "terminal-smoke-token";
 const smokePortServerPath = resolve("output/playwright/wmux-smoke-port-server.mjs");
+const globalConfigPath = resolve("output/playwright/wmux-global.json");
 const projectConfigPath = resolve("wmux.json");
 const projectConfigBackupPath = resolve("output/playwright/wmux-json.backup");
 const hadProjectConfig = existsSync(projectConfigPath);
@@ -35,6 +36,30 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
 if (hadProjectConfig) {
   writeFileSync(projectConfigBackupPath, originalProjectConfig, "utf8");
 }
+writeFileSync(
+  globalConfigPath,
+  `${JSON.stringify(
+    {
+      commands: [
+        {
+          name: "Run Global Marker",
+          description: "从全局 wmux.json 写入 smoke 标记",
+          keywords: ["global", "marker"],
+          command: "Write-Output WMUX_GLOBAL_COMMAND"
+        },
+        {
+          name: "Run Smoke Marker",
+          description: "全局命令会被项目同名命令覆盖",
+          keywords: ["global", "shadow"],
+          command: "Write-Output WMUX_GLOBAL_SHADOW"
+        }
+      ]
+    },
+    null,
+    2
+  )}\n`,
+  "utf8"
+);
 writeFileSync(
   projectConfigPath,
   `${JSON.stringify(
@@ -150,6 +175,7 @@ async function launchApp() {
     env: {
       ...process.env,
       WMUX_USER_DATA_DIR: smokeUserDataPath,
+      WMUX_GLOBAL_CONFIG_PATH: globalConfigPath,
       WMUX_SOCKET_PATH: smokeSocketPath,
       WMUX_SOCKET_TOKEN: smokeSocketToken
     }
@@ -1138,13 +1164,24 @@ async function runCommandPaletteSmoke(window) {
 
   await window.getByRole("button", { name: "Command" }).click();
   await window.getByLabel("Command palette").waitFor({ timeout: 15_000 });
-  await window.getByText("4 个项目命令").waitFor({ timeout: 15_000 });
+  await window.getByText("5 个命令（全局 2 / 项目 4）").waitFor({ timeout: 15_000 });
   log("ok project wmux config");
 
   const commandSearch = window.getByLabel("Command search");
   await commandSearch.fill("layout");
   await commandSearch.press("Escape");
   await window.getByLabel("Command palette").waitFor({ state: "detached", timeout: 15_000 });
+
+  await window.getByRole("button", { name: "Command" }).click();
+  await commandSearch.fill("global marker");
+  await commandSearch.press("Enter");
+  await window.getByLabel("Confirm project command").waitFor({ timeout: 15_000 });
+  await window.getByRole("button", { name: "Run project command" }).click();
+  await window.getByLabel("Command palette").waitFor({ state: "detached", timeout: 15_000 });
+  await window.waitForFunction(() => document.body.textContent?.includes("WMUX_GLOBAL_COMMAND"), null, {
+    timeout: 15_000
+  });
+  log("ok global command");
 
   await window.getByRole("button", { name: "Command" }).click();
   await commandSearch.fill("run smoke");
@@ -1415,6 +1452,16 @@ try {
   smokePortServer = await startSmokePortServer();
   app = await launchApp();
   let window = await getReadyWindow(app);
+  const loadedConfig = await window.evaluate(() => window.wmux?.config.loadProjectConfig());
+  const loadedCommands = loadedConfig?.config?.commands ?? [];
+  if (!loadedCommands.some((command) => command.name === "Run Global Marker" && command.source === "global")) {
+    throw new Error(`Global wmux config command was not loaded: ${JSON.stringify(loadedConfig)}`);
+  }
+  const smokeMarkerCommands = loadedCommands.filter((command) => command.name === "Run Smoke Marker");
+  if (smokeMarkerCommands.length !== 1 || smokeMarkerCommands[0]?.source !== "project") {
+    throw new Error(`Project wmux config did not override global command: ${JSON.stringify(loadedConfig)}`);
+  }
+  log("ok global/project wmux config merge");
   const shellOptions = await window
     .locator('select[aria-label="Terminal shell"] option')
     .evaluateAll((options) => options.map((option) => ({ value: option.value, label: option.textContent })));
@@ -1531,6 +1578,7 @@ try {
   } else {
     rmSync(projectConfigPath, { force: true });
   }
+  rmSync(globalConfigPath, { force: true });
   rmSync(projectConfigBackupPath, { force: true });
 }
 

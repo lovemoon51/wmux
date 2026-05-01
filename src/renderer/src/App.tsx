@@ -714,11 +714,12 @@ function commandMatchesQuery(command: WmuxCommandConfig, query: string): boolean
 }
 
 function getCommandTypeLabel(command: WmuxCommandConfig): string {
+  const sourcePrefix = command.source === "global" ? "Global " : command.source === "project" ? "Project " : "";
   if (command.workspace) {
-    return "Workspace";
+    return `${sourcePrefix}Workspace`;
   }
 
-  return "Terminal";
+  return `${sourcePrefix}Terminal`;
 }
 
 function createSocketSuccessResponse(id: string, result: unknown): SocketRpcResponse {
@@ -1566,7 +1567,7 @@ export function App(): ReactElement {
   const [commandQuery, setCommandQuery] = useState("");
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [pendingTerminalCommands, setPendingTerminalCommands] = useState<PendingTerminalCommand[]>([]);
-  const [trustedCommandConfigPath, setTrustedCommandConfigPath] = useState<string | null>(null);
+  const [trustedCommandConfigPaths, setTrustedCommandConfigPaths] = useState<string[]>([]);
   const [pendingCommandConfirmation, setPendingCommandConfirmation] =
     useState<PendingProjectCommandConfirmation | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1695,7 +1696,10 @@ export function App(): ReactElement {
     ? Math.min(selectedCommandIndex, filteredCommands.length - 1)
     : 0;
   const configStatusText = projectConfig?.found
-    ? `${projectCommands.length} 个项目命令`
+    ? `${projectCommands.length} 个命令（${projectConfig.sources
+        ?.filter((source) => source.found)
+        .map((source) => `${source.kind === "global" ? "全局" : "项目"} ${source.commandCount}`)
+        .join(" / ") || "项目"}）`
     : "未发现 wmux.json";
   const configErrorText = projectConfig?.errors.join("；");
 
@@ -1922,8 +1926,8 @@ export function App(): ReactElement {
   };
 
   const runProjectCommand = (command: WmuxCommandConfig): void => {
-    const configPath = projectConfig?.path;
-    if (projectConfig?.found && configPath && trustedCommandConfigPath !== configPath) {
+    const configPath = command.sourcePath ?? projectConfig?.path;
+    if (projectConfig?.found && configPath && !trustedCommandConfigPaths.includes(configPath)) {
       setPendingCommandConfirmation({ command, reason: "trust" });
       return;
     }
@@ -1938,8 +1942,11 @@ export function App(): ReactElement {
       return;
     }
 
-    if (confirmation.reason === "trust" && projectConfig?.path) {
-      setTrustedCommandConfigPath(projectConfig.path);
+    if (confirmation.reason === "trust") {
+      const configPath = confirmation.command.sourcePath ?? projectConfig?.path;
+      if (configPath) {
+        setTrustedCommandConfigPaths((paths) => (paths.includes(configPath) ? paths : [...paths, configPath]));
+      }
     }
     if (confirmation.reason === "restart") {
       buildAndAddWorkspaceCommand(confirmation.command, confirmation.existingWorkspaceId);
@@ -3141,7 +3148,7 @@ export function App(): ReactElement {
       />
       <ProjectCommandConfirmDialog
         confirmation={pendingCommandConfirmation}
-        configPath={projectConfig?.path}
+        configPath={pendingCommandConfirmation?.command.sourcePath ?? projectConfig?.path}
         onCancel={() => setPendingCommandConfirmation(null)}
         onConfirm={confirmProjectCommand}
       />
