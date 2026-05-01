@@ -41,6 +41,7 @@ import type {
   BrowserEvalParams,
   BrowserFillParams,
   BrowserNavigateParams,
+  BrowserPressParams,
   BrowserRpcMethod,
   BrowserScreenshotParams,
   BrowserSelectorWait,
@@ -48,6 +49,7 @@ import type {
   BrowserSnapshotNode,
   BrowserSnapshotParams,
   BrowserSurfaceSelector,
+  BrowserTypeParams,
   BrowserWaitParams,
   BrowserWaitUntil,
   ClearStatusParams,
@@ -912,6 +914,8 @@ const socketCapabilities: SocketRpcMethod[] = [
   "browser.navigate",
   "browser.click",
   "browser.fill",
+  "browser.type",
+  "browser.press",
   "browser.wait",
   "browser.eval",
   "browser.snapshot",
@@ -930,6 +934,8 @@ function isBrowserRpcMethod(method: string): method is BrowserRpcMethod {
     method === "browser.navigate" ||
     method === "browser.click" ||
     method === "browser.fill" ||
+    method === "browser.type" ||
+    method === "browser.press" ||
     method === "browser.wait" ||
     method === "browser.eval" ||
     method === "browser.snapshot" ||
@@ -1441,6 +1447,122 @@ function getWaitForSelectorScript(selector: string, wait: BrowserSelectorWait, t
   }))()`;
 }
 
+function getKeyboardActionScript(
+  action: "type" | "press",
+  selector: string,
+  wait: BrowserSelectorWait,
+  timeoutMs: number,
+  value: string
+): string {
+  return `(() => new Promise((resolve, reject) => {
+    const selector = ${serializeForInjectedScript(selector)};
+    const wait = ${serializeForInjectedScript(wait)};
+    const timeoutMs = ${timeoutMs};
+    const value = ${serializeForInjectedScript(value)};
+    const action = ${serializeForInjectedScript(action)};
+    const startedAt = Date.now();
+    const isVisible = (element) => {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    };
+    const keyMap = {
+      enter: { key: "Enter", code: "Enter" },
+      tab: { key: "Tab", code: "Tab" },
+      escape: { key: "Escape", code: "Escape" },
+      esc: { key: "Escape", code: "Escape" },
+      backspace: { key: "Backspace", code: "Backspace" },
+      delete: { key: "Delete", code: "Delete" },
+      arrowleft: { key: "ArrowLeft", code: "ArrowLeft" },
+      left: { key: "ArrowLeft", code: "ArrowLeft" },
+      arrowright: { key: "ArrowRight", code: "ArrowRight" },
+      right: { key: "ArrowRight", code: "ArrowRight" },
+      arrowup: { key: "ArrowUp", code: "ArrowUp" },
+      up: { key: "ArrowUp", code: "ArrowUp" },
+      arrowdown: { key: "ArrowDown", code: "ArrowDown" },
+      down: { key: "ArrowDown", code: "ArrowDown" }
+    };
+    const editableValue = (element) =>
+      element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+        ? element.value
+        : element.isContentEditable
+          ? element.textContent ?? ""
+          : "";
+    const setEditableValue = (element, nextValue) => {
+      if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+        element.value = nextValue;
+        return true;
+      }
+      if (element.isContentEditable) {
+        element.textContent = nextValue;
+        return true;
+      }
+      return false;
+    };
+    const dispatchKey = (element, type, keyInfo) => {
+      element.dispatchEvent(new KeyboardEvent(type, { bubbles: true, cancelable: true, key: keyInfo.key, code: keyInfo.code }));
+    };
+    const dispatchInput = (element, inputType, data) => {
+      element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType, data }));
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    const pressKey = (element, rawKey) => {
+      const keyInfo = keyMap[String(rawKey).trim().toLowerCase()] ?? { key: String(rawKey), code: String(rawKey) };
+      dispatchKey(element, "keydown", keyInfo);
+      if (keyInfo.key === "Backspace") {
+        const current = editableValue(element);
+        if (setEditableValue(element, current.slice(0, -1))) dispatchInput(element, "deleteContentBackward", null);
+      } else if (keyInfo.key === "Delete") {
+        const current = editableValue(element);
+        if (setEditableValue(element, current.slice(1))) dispatchInput(element, "deleteContentForward", null);
+      } else if (keyInfo.key === "Enter") {
+        if (element instanceof HTMLTextAreaElement || element.isContentEditable) {
+          const current = editableValue(element);
+          if (setEditableValue(element, current + "\\n")) dispatchInput(element, "insertLineBreak", "\\n");
+        } else if (element instanceof HTMLElement) {
+          element.closest("form")?.requestSubmit?.();
+        }
+      } else if (keyInfo.key === "Tab" && element instanceof HTMLElement) {
+        element.blur();
+      } else if (keyInfo.key.length === 1) {
+        const current = editableValue(element);
+        if (setEditableValue(element, current + keyInfo.key)) dispatchInput(element, "insertText", keyInfo.key);
+      }
+      dispatchKey(element, "keyup", keyInfo);
+      return keyInfo.key;
+    };
+    const tick = () => {
+      const matches = Array.from(document.querySelectorAll(selector));
+      const element = matches.find((item) => wait !== "visible" || isVisible(item));
+      if (!element && Date.now() - startedAt < timeoutMs) {
+        window.setTimeout(tick, 50);
+        return;
+      }
+      if (!element) {
+        reject(Object.assign(new Error("selector did not appear before timeout"), { code: "TIMEOUT", matched: matches.length }));
+        return;
+      }
+      if (!(element instanceof HTMLElement)) {
+        reject(Object.assign(new Error("target is not an HTMLElement"), { code: "BAD_REQUEST" }));
+        return;
+      }
+      element.focus();
+      if (action === "type") {
+        if (!setEditableValue(element, editableValue(element) + value)) {
+          reject(Object.assign(new Error("target is not editable"), { code: "BAD_REQUEST" }));
+          return;
+        }
+        dispatchInput(element, "insertText", value);
+        resolve({ matched: matches.length, selector, typed: true, valueLength: value.length });
+        return;
+      }
+      const key = pressKey(element, value);
+      resolve({ matched: matches.length, selector, pressed: true, key });
+    };
+    tick();
+  }))()`;
+}
+
 function getSnapshotScript(params: BrowserSnapshotParams): string {
   return `(() => {
     const rootSelector = ${serializeForInjectedScript(params.selector)};
@@ -1737,6 +1859,34 @@ async function runBrowserRpc(
       timeoutMs + 500
     );
     return { ...commonResult, selector: fillParams.selector, filled: true, valueLength: result.valueLength };
+  }
+
+  if (method === "browser.type") {
+    const typeParams = params as Partial<BrowserTypeParams>;
+    if (typeof typeParams.selector !== "string" || !typeParams.selector.trim() || typeof typeParams.text !== "string") {
+      throw createBrowserError("BAD_REQUEST", "browser.type 需要 selector 和 text");
+    }
+    const timeoutMs = getBrowserTimeout(params, 5000);
+    const result = await executeBrowserJavaScript<{ matched: number; selector: string; typed: true; valueLength: number }>(
+      runtime,
+      getKeyboardActionScript("type", typeParams.selector, readSelectorWait(params), timeoutMs, typeParams.text),
+      timeoutMs + 500
+    );
+    return { ...commonResult, selector: result.selector, matched: result.matched, typed: true, valueLength: result.valueLength };
+  }
+
+  if (method === "browser.press") {
+    const pressParams = params as Partial<BrowserPressParams>;
+    if (typeof pressParams.selector !== "string" || !pressParams.selector.trim() || typeof pressParams.key !== "string" || !pressParams.key.trim()) {
+      throw createBrowserError("BAD_REQUEST", "browser.press 需要 selector 和 key");
+    }
+    const timeoutMs = getBrowserTimeout(params, 5000);
+    const result = await executeBrowserJavaScript<{ matched: number; selector: string; pressed: true; key: string }>(
+      runtime,
+      getKeyboardActionScript("press", pressParams.selector, readSelectorWait(params), timeoutMs, pressParams.key),
+      timeoutMs + 500
+    );
+    return { ...commonResult, selector: result.selector, matched: result.matched, pressed: true, key: result.key };
   }
 
   if (method === "browser.wait") {

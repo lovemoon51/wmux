@@ -313,6 +313,24 @@ try {
   }
   log("ok browser fill");
 
+  await runCli(["browser", "fill", "#name", "", "--surface", navigate.surfaceId]);
+  await runCli(["browser", "type", "#name", "typed", "--surface", navigate.surfaceId]);
+  const typedValue = parseJson(
+    (await runCli(["browser", "eval", "document.querySelector('#name').value", "--surface", navigate.surfaceId, "--json"])).stdout
+  );
+  if (typedValue.value !== "typed") {
+    throw new Error(`type did not append text: ${JSON.stringify(typedValue)}`);
+  }
+  await runCli(["browser", "press", "#name", "Backspace", "--surface", navigate.surfaceId]);
+  const pressedValue = parseJson(
+    (await runCli(["browser", "eval", "document.querySelector('#name').value", "--surface", navigate.surfaceId, "--json"])).stdout
+  );
+  if (pressedValue.value !== "type") {
+    throw new Error(`press did not apply Backspace: ${JSON.stringify(pressedValue)}`);
+  }
+  log("ok browser type/press");
+
+  await runCli(["browser", "fill", "#name", "wmux", "--surface", navigate.surfaceId]);
   await runCli(["browser", "click", "#submit", "--surface", navigate.surfaceId]);
   const clickedValue = parseJson(
     (await runCli(["browser", "eval", "document.body.dataset.clicked", "--surface", navigate.surfaceId, "--json"])).stdout

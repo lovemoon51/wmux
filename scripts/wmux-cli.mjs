@@ -54,6 +54,8 @@ function printUsage() {
   wmux browser list [--json]
   wmux browser click <selector> [--timeout <ms>] [--wait visible|attached|none] [--json]
   wmux browser fill <selector> <text> [--text <text>] [--text-file <path>] [--json]
+  wmux browser type <selector> <text> [--text <text>] [--text-file <path>] [--json]
+  wmux browser press <selector> <key> [--key <key>] [--json]
   wmux browser wait [<selector>] [--selector <selector>] [--wait visible|attached|none] [--load-wait load|domcontentloaded|none] [--timeout <ms>] [--json]
   wmux browser eval <script> [--json]
   wmux browser eval-file <path> [--json]
@@ -269,6 +271,53 @@ function createBrowserRequest() {
     };
   }
 
+  if (browserCommand === "type") {
+    const selector = args[2];
+    if (!selector || selector.startsWith("--")) {
+      throw cliError("browser type 需要 selector");
+    }
+    const textValues = [
+      args[3] !== undefined && !args[3].startsWith("--") ? args[3] : undefined,
+      parseOption("--text"),
+      parseOption("--text-file")
+    ].filter((value) => value !== undefined);
+    if (textValues.length !== 1) {
+      throw cliError("browser type 需要且只能通过位置参数、--text、--text-file 之一传入文本");
+    }
+    const textFile = parseOption("--text-file");
+    return {
+      method: "browser.type",
+      params: {
+        ...readSelectorParams(false),
+        selector,
+        text: textFile ? readFileSync(resolve(textFile), "utf8") : textValues[0],
+        ...(readBrowserSelectorWaitOption() ? { wait: readBrowserSelectorWaitOption() } : {}),
+        ...(readTimeout() ? { timeoutMs: readTimeout() } : {})
+      }
+    };
+  }
+
+  if (browserCommand === "press") {
+    const selector = args[2];
+    const key = parseOption("--key") ?? (args[3] && !args[3].startsWith("--") ? args[3] : undefined);
+    if (!selector || selector.startsWith("--")) {
+      throw cliError("browser press 需要 selector");
+    }
+    if (!key || key.startsWith("--")) {
+      throw cliError("browser press 需要 key");
+    }
+    return {
+      method: "browser.press",
+      params: {
+        ...readSelectorParams(false),
+        selector,
+        key,
+        ...(readBrowserSelectorWaitOption() ? { wait: readBrowserSelectorWaitOption() } : {}),
+        ...(readTimeout() ? { timeoutMs: readTimeout() } : {})
+      }
+    };
+  }
+
   if (browserCommand === "wait") {
     const positionalSelector = args[2] && !args[2].startsWith("--") ? args[2] : undefined;
     const selector = parseOption("--selector") ?? positionalSelector;
@@ -381,9 +430,11 @@ function createBrowserRequest() {
     if (!selector || selector.startsWith("--")) {
       throw cliError("browser fill 需要 selector");
     }
-    const textValues = [args[3] && !args[3].startsWith("--") ? args[3] : undefined, parseOption("--text"), parseOption("--text-file")].filter(
-      (value) => value !== undefined
-    );
+    const textValues = [
+      args[3] !== undefined && !args[3].startsWith("--") ? args[3] : undefined,
+      parseOption("--text"),
+      parseOption("--text-file")
+    ].filter((value) => value !== undefined);
     if (textValues.length !== 1) {
       throw cliError("browser fill 需要且只能通过位置参数、--text、--text-file 之一传入文本");
     }
@@ -871,6 +922,14 @@ function printBrowserResult(result) {
   }
   if (browserCommand === "fill") {
     console.log(`filled ${result?.selector ?? "selector"}`);
+    return;
+  }
+  if (browserCommand === "type") {
+    console.log(`typed ${result?.selector ?? "selector"}`);
+    return;
+  }
+  if (browserCommand === "press") {
+    console.log(`pressed ${result?.key ?? "key"} ${result?.selector ?? "selector"}`);
     return;
   }
   if (browserCommand === "click") {

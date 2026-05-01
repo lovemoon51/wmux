@@ -111,6 +111,8 @@ wmux browser snapshot --surface surface:3
 wmux browser wait "#app" --surface surface:3
 wmux browser click "button[type='submit']" --surface surface:3
 wmux browser fill "#email" --text "dev@example.com" --surface surface:3
+wmux browser type "#email" ".test" --surface surface:3
+wmux browser press "#email" Backspace --surface surface:3
 wmux browser eval "document.title" --surface surface:3
 wmux browser console list --surface surface:3
 wmux browser errors list --surface surface:3
@@ -150,6 +152,8 @@ wmux browser storage set --key wmux_local --value updated --surface surface:3
 | `browser.wait` | `{ surfaceId?, selector?, wait?, waitUntil?, timeoutMs? }` | matched selector or load state |
 | `browser.click` | `{ surfaceId, selector }` | ok |
 | `browser.fill` | `{ surfaceId, selector, text }` | ok |
+| `browser.type` | `{ surfaceId, selector, text }` | ok |
+| `browser.press` | `{ surfaceId, selector, key }` | ok |
 | `browser.eval` | `{ surfaceId, script }` | value |
 | `browser.console.list` | `{ surfaceId?, paneId?, workspaceId?, active?, limit? }` | console entries |
 | `browser.errors.list` | `{ surfaceId?, paneId?, workspaceId?, active?, limit? }` | error entries |

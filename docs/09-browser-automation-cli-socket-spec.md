@@ -367,7 +367,92 @@ CLI 规则：
 - `--text-file` 从 UTF-8 文件读取文本。
 - 同时传位置文本、`--text`、`--text-file` 时返回 CLI 使用错误。
 
-### 7.5 `browser.wait`
+### 7.5 `browser.type`
+
+Params:
+
+```ts
+{
+  surfaceId?: string;
+  paneId?: string;
+  workspaceId?: string;
+  active?: boolean;
+  selector: string;
+  text: string;
+  timeoutMs?: number;
+  wait?: "visible" | "attached" | "none";
+}
+```
+
+Result:
+
+```ts
+{
+  surfaceId: string;
+  selector: string;
+  matched: number;
+  typed: true;
+  valueLength: number;
+}
+```
+
+Rules:
+
+- `type` 在当前值末尾追加文本，并触发 `input/change`。
+- P0 不模拟逐字符键盘延迟；需要完整键盘事件流时后续单独扩展。
+- CLI 文本参数规则与 `browser.fill` 一致。
+
+CLI:
+
+```bash
+wmux browser type "#email" ".test"
+wmux browser type "#prompt" --text-file prompt.txt
+```
+
+### 7.6 `browser.press`
+
+Params:
+
+```ts
+{
+  surfaceId?: string;
+  paneId?: string;
+  workspaceId?: string;
+  active?: boolean;
+  selector: string;
+  key: string;
+  timeoutMs?: number;
+  wait?: "visible" | "attached" | "none";
+}
+```
+
+Result:
+
+```ts
+{
+  surfaceId: string;
+  selector: string;
+  matched: number;
+  pressed: true;
+  key: string;
+}
+```
+
+Rules:
+
+- P0 支持常用键：`Enter`、`Tab`、`Escape`/`Esc`、`Backspace`、`Delete`、方向键，以及单字符键。
+- 对可编辑元素，`Backspace`、`Delete`、`Enter` 和单字符键会尽量模拟默认文本变化并触发 `input/change`。
+- 复杂组合键、快捷键和跨平台真实键盘注入不属于 P0。
+
+CLI:
+
+```bash
+wmux browser press "#email" Backspace
+wmux browser press "#prompt" Enter
+wmux browser press "#email" --key A
+```
+
+### 7.7 `browser.wait`
 
 Params:
 
@@ -428,7 +513,7 @@ wmux browser wait --selector "#app" --wait attached --timeout 8000
 wmux browser wait --load-wait load --surface <surfaceId>
 ```
 
-### 7.6 `browser.eval`
+### 7.8 `browser.eval`
 
 Params:
 
@@ -481,7 +566,7 @@ CLI 输出：
 - 默认输出 `value` 的文本形式。
 - `--json` 输出完整 socket result JSON。
 
-### 7.7 `browser.snapshot`
+### 7.9 `browser.snapshot`
 
 Params:
 
@@ -560,7 +645,7 @@ Errors:
 - `TIMEOUT`: snapshot 等待超时。
 - `BROWSER_ERROR`: DOM snapshot 失败。
 
-### 7.8 `browser.screenshot`
+### 7.10 `browser.screenshot`
 
 Params:
 
@@ -618,7 +703,7 @@ wmux browser screenshot --selector "#app" --out app.png
 wmux browser screenshot --base64
 ```
 
-### 7.9 `browser.cookies.list`
+### 7.11 `browser.cookies.list`
 
 Params:
 
@@ -659,7 +744,7 @@ wmux browser cookies list --surface <surfaceId>
 wmux browser cookies list --surface <surfaceId> --json
 ```
 
-### 7.10 `browser.storage.list|get|set`
+### 7.12 `browser.storage.list|get|set`
 
 Params:
 
@@ -742,7 +827,7 @@ wmux browser storage set --key wmux_local --value updated --surface <surfaceId>
 - `--active` 与显式 id 同传时返回 CLI 使用错误。
 - `--create` 只允许 `browser navigate`，映射到 `createIfMissing: true`。
 - `wmux browser open <url>` 是 CLI alias，等价于 `wmux browser navigate <url> --create`，不新增 socket method。
-- `browser click/fill/wait/eval/snapshot/screenshot/console/errors/cookies/storage --create` 必须返回 CLI 使用错误，exit code `2`。
+- `browser click/fill/type/press/wait/eval/snapshot/screenshot/console/errors/cookies/storage --create` 必须返回 CLI 使用错误，exit code `2`。
 - `--timeout` 单位毫秒。
 - `--json` 输出完整 JSON 响应；否则输出人类可读结果。
 
@@ -809,16 +894,17 @@ INTERNAL
 8. CLI 调 `wmux browser snapshot --json`，断言包含页面标题和按钮。
 9. CLI 调 `wmux browser wait "#submit" --json` 和 `wmux browser wait --load-wait domcontentloaded --json`，断言 selector/load-state 等待成功。
 10. CLI 调 `wmux browser fill "#name" "wmux"`，再 `eval "document.querySelector('#name').value"`，断言为 `wmux`。
-11. CLI 调 `wmux browser click "#submit"`，断言页面显示 `clicked: wmux`。
-12. CLI 调 `wmux browser eval "document.body.dataset.clicked"`，断言为 `wmux`。
-13. CLI 调 `wmux browser screenshot --out output/playwright/browser-automation-smoke.png`，断言文件存在且大于 1KB。
-14. CLI 调 `wmux browser screenshot --base64 --json`，断言 `mimeType` 和 `base64` 存在。
-15. 创建第二个 browser surface 后调用 `wmux browser snapshot`，断言返回 `AMBIGUOUS_TARGET` 且 CLI 输出候选 `--surface <id>`；再用 `--surface` 精确指定并成功。
-16. CLI 调 `wmux browser console list --surface <id> --json` 和 `wmux browser errors list --surface <id> --json`，断言可读取页面 console log/error，且 errors 只返回 error 级别。
-17. CLI 导航到同源 HTTP storage 测试页，调用 `wmux browser cookies list --surface <id> --json`，断言可读取脚本可见 cookie。
-18. CLI 调 `wmux browser storage list/get/set --surface <id> --json`，断言 localStorage 和 sessionStorage 可读写。
-19. 调用 `wmux browser click "#submit" --create`，断言 CLI exit code 为 `2`。
-20. 关闭 Electron，清理临时 userData。
+11. CLI 调 `wmux browser type "#name" "typed"` 和 `wmux browser press "#name" Backspace`，断言输入值按预期变化。
+12. CLI 调 `wmux browser click "#submit"`，断言页面显示 `clicked: wmux`。
+13. CLI 调 `wmux browser eval "document.body.dataset.clicked"`，断言为 `wmux`。
+14. CLI 调 `wmux browser screenshot --out output/playwright/browser-automation-smoke.png`，断言文件存在且大于 1KB。
+15. CLI 调 `wmux browser screenshot --base64 --json`，断言 `mimeType` 和 `base64` 存在。
+16. 创建第二个 browser surface 后调用 `wmux browser snapshot`，断言返回 `AMBIGUOUS_TARGET` 且 CLI 输出候选 `--surface <id>`；再用 `--surface` 精确指定并成功。
+17. CLI 调 `wmux browser console list --surface <id> --json` 和 `wmux browser errors list --surface <id> --json`，断言可读取页面 console log/error，且 errors 只返回 error 级别。
+18. CLI 导航到同源 HTTP storage 测试页，调用 `wmux browser cookies list --surface <id> --json`，断言可读取脚本可见 cookie。
+19. CLI 调 `wmux browser storage list/get/set --surface <id> --json`，断言 localStorage 和 sessionStorage 可读写。
+20. 调用 `wmux browser click "#submit" --create`，断言 CLI exit code 为 `2`。
+21. 关闭 Electron，清理临时 userData。
 
 测试页面：
 
@@ -846,6 +932,7 @@ ok browser list
 ok browser snapshot
 ok browser wait
 ok browser fill
+ok browser type/press
 ok browser click
 ok browser console/errors list
 ok browser eval

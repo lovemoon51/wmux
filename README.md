@@ -42,6 +42,8 @@ wmux browser list
 wmux browser snapshot --surface <surfaceId>
 wmux browser wait "#name" --surface <surfaceId>
 wmux browser fill "#name" "wmux" --surface <surfaceId>
+wmux browser type "#name" "!" --surface <surfaceId>
+wmux browser press "#name" Backspace --surface <surfaceId>
 wmux browser click "#submit" --surface <surfaceId>
 wmux browser console list --surface <surfaceId>
 wmux browser errors list --surface <surfaceId>

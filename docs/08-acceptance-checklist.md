@@ -80,4 +80,4 @@
 - `npm run smoke:terminal` 覆盖 workspace CRUD、sidebar branch/port/notice/status、通知历史、agent 确认提示识别、split CRUD、surface tab、terminal 输入/clear/resize/profile、右键复制粘贴、browser CRUD、拖拽分屏、session restore、command palette、custom command 首次确认/取消、workspace layout、快捷键和性能 smoke。
 - `npm run smoke:terminal` 覆盖项目配置读取、`wmux config`、全局/项目命令合并，以及无 `wmux.json` 时读取 `.cmux/cmux.json` 的 cmux 兼容 fallback。
 - `npm run smoke:terminal` 覆盖 CLI 兼容命令：`--help`/`help`、`current-workspace`、`list-surfaces`、`focus-surface`、`send-surface`、`send-key-surface`、`new-split`、`status set/list/history/clear`。
-- `npm run smoke:browser` 覆盖 socket 安全模式、terminal 链接内置 browser、browser automation navigate/list/wait/snapshot/selector snapshot/fill/click/eval/console/errors/cookies/storage/state inspection/screenshot、ambiguous target 和写文件路径校验。
+- `npm run smoke:browser` 覆盖 socket 安全模式、terminal 链接内置 browser、browser automation navigate/list/wait/snapshot/selector snapshot/fill/type/press/click/eval/console/errors/cookies/storage/state inspection/screenshot、ambiguous target 和写文件路径校验。

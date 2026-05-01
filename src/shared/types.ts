@@ -265,6 +265,8 @@ export type BrowserRpcMethod =
   | "browser.navigate"
   | "browser.click"
   | "browser.fill"
+  | "browser.type"
+  | "browser.press"
   | "browser.wait"
   | "browser.eval"
   | "browser.snapshot"
@@ -344,6 +346,20 @@ export type BrowserFillParams = BrowserSurfaceSelector & {
   wait?: BrowserSelectorWait;
 };
 
+export type BrowserTypeParams = BrowserSurfaceSelector & {
+  selector: string;
+  text: string;
+  timeoutMs?: number;
+  wait?: BrowserSelectorWait;
+};
+
+export type BrowserPressParams = BrowserSurfaceSelector & {
+  selector: string;
+  key: string;
+  timeoutMs?: number;
+  wait?: BrowserSelectorWait;
+};
+
 export type BrowserWaitParams = BrowserSurfaceSelector & {
   selector?: string;
   wait?: BrowserSelectorWait;
@@ -416,6 +432,8 @@ export type BrowserRpcParams =
   | BrowserNavigateParams
   | BrowserClickParams
   | BrowserFillParams
+  | BrowserTypeParams
+  | BrowserPressParams
   | BrowserWaitParams
   | BrowserEvalParams
   | BrowserSnapshotParams
