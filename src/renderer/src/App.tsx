@@ -90,7 +90,8 @@ import type {
   WorkspaceSelectParams,
   WorkspaceStatus,
   WorkspaceStatusEvent,
-  WorkspaceSummary
+  WorkspaceSummary,
+  TerminalNotificationPayload
 } from "@shared/types";
 import { TerminalSurface, setTerminalSearchHandlers } from "./components/TerminalSurface";
 
@@ -2438,6 +2439,31 @@ export function App(): ReactElement {
       setTerminalSearchHandlers({});
     };
   }, [handleTerminalSearchReady, openFindBar]);
+
+  // 订阅 OSC 9/99/777 终端通知：复用 status.notify 路径，写入 workspace status event
+  useEffect(() => {
+    const cleanup = window.wmux?.terminal.onNotification?.((payload: TerminalNotificationPayload) => {
+      setWorkspaces((items) => {
+        const target = findSurfaceById(items, payload.surfaceId);
+        if (!target) {
+          return items;
+        }
+        const targetWorkspaceId = target.workspace.id;
+        const trimmedBody = payload.body?.trim();
+        const notice = trimmedBody ? `${payload.title}: ${trimmedBody}` : payload.title;
+        return items.map((workspace) =>
+          workspace.id === targetWorkspaceId
+            ? {
+                ...withWorkspaceStatusEvent(workspace, { status: "attention", message: notice }),
+                status: "attention",
+                notice
+              }
+            : workspace
+        );
+      });
+    });
+    return cleanup;
+  }, []);
 
   const runSimpleCommand = (command: WmuxCommandConfig): void => {
     if (!command.command) {

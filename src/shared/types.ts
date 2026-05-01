@@ -512,3 +512,12 @@ export type PersistedAppState = {
   workspaces: Workspace[];
   browserSessions?: Record<string, PersistedBrowserSession>;
 };
+
+// 终端 OSC 9 / 99 / 777 通知序列解析后的载荷
+export type TerminalNotificationPayload = {
+  surfaceId: string;
+  // OSC 序列码：9 = macOS Terminal、99 = iTerm2/VS Code、777 = rxvt
+  code: 9 | 99 | 777;
+  title: string;
+  body: string;
+};

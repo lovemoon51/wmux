@@ -7,6 +7,7 @@ import type {
   SocketRpcResponse,
   SocketSecurityMode,
   SocketSecuritySettings,
+  TerminalNotificationPayload,
   WmuxProjectConfigResult,
   WorkspaceInspection
 } from "../shared/types";
@@ -53,6 +54,11 @@ const api = {
       ): void => callback(payload);
       ipcRenderer.on("terminal:exit", listener);
       return () => ipcRenderer.removeListener("terminal:exit", listener);
+    },
+    onNotification: (callback: (payload: TerminalNotificationPayload) => void): (() => void) => {
+      const listener = (_event: IpcRendererEvent, payload: TerminalNotificationPayload): void => callback(payload);
+      ipcRenderer.on("terminal:notification", listener);
+      return () => ipcRenderer.removeListener("terminal:notification", listener);
     }
   },
   browser: {
