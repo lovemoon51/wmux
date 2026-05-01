@@ -4205,12 +4205,13 @@ function WorkspaceSidebar({
 
       <div className="sidebarFooter">
         <button
-          className="utilityButton"
+          className={`utilityButton ${notificationsOpen ? "utilityButtonActive" : ""}`}
           type="button"
+          aria-label="Notifications"
           aria-expanded={notificationsOpen}
           onClick={onToggleNotifications}
         >
-          <Bell size={15} />
+          <Bell size={14} />
           <span>Notifications</span>
           <span className="utilityCount">{notificationItems.length}</span>
         </button>
@@ -4268,8 +4269,14 @@ function WorkspaceSidebar({
             )}
           </div>
         )}
-        <button className="utilityButton" type="button" aria-expanded={settingsOpen} onClick={onToggleSettings}>
-          <Settings size={15} />
+        <button
+          className={`utilityButton ${settingsOpen ? "utilityButtonActive" : ""}`}
+          type="button"
+          aria-label="Settings"
+          aria-expanded={settingsOpen}
+          onClick={onToggleSettings}
+        >
+          <Settings size={14} />
           <span>Settings</span>
         </button>
         {settingsOpen && (

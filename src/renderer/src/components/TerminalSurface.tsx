@@ -1,7 +1,7 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
-import { Activity, Code2 } from "lucide-react";
-import { useEffect, useRef, type ReactElement } from "react";
+import { Activity, Code2, Minus, Plus } from "lucide-react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import type { ShellProfile, Surface, WorkspaceStatus } from "@shared/types";
 import "@xterm/xterm/css/xterm.css";
 
@@ -17,6 +17,10 @@ const statusLabels: Record<WorkspaceStatus, string> = {
 };
 
 const pendingTerminalDisposeTimers = new Map<string, number>();
+
+const minTerminalFontSize = 10;
+const maxTerminalFontSize = 20;
+const defaultTerminalFontSize = 13;
 
 function extractTerminalUrls(text: string): Array<{ url: string; index: number }> {
   return Array.from(text.matchAll(terminalUrlPattern))
@@ -47,6 +51,7 @@ export function TerminalSurface({
   const onOutputRef = useRef(onOutput);
   const lastSelectionRef = useRef("");
   const sessionId = `${surface.id}:${shell}`;
+  const [fontSize, setFontSize] = useState(defaultTerminalFontSize);
 
   useEffect(() => {
     onOpenUrlRef.current = onOpenUrl;
@@ -72,14 +77,16 @@ export function TerminalSurface({
       allowProposedApi: false,
       cursorBlink: true,
       convertEol: true,
-      fontFamily: '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
-      fontSize: 13,
-      lineHeight: 1.35,
+      fontFamily: '"JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace',
+      fontSize,
+      lineHeight: 1.32,
       theme: {
         background: "#101214",
         foreground: "#d7dee7",
         cursor: "#3daee9",
+        cursorAccent: "#101214",
         selectionBackground: "#314253",
+        selectionForeground: "#eceff3",
         black: "#101214",
         red: "#ef6b73",
         green: "#58c27d",
@@ -108,12 +115,16 @@ export function TerminalSurface({
     fitAddonRef.current = fitAddon;
 
     const fitAndResize = (): void => {
-      fitAddon.fit();
-      window.wmux?.terminal.resize({
-        id: sessionId,
-        cols: terminal.cols,
-        rows: terminal.rows
-      });
+      try {
+        fitAddon.fit();
+        window.wmux?.terminal.resize({
+          id: sessionId,
+          cols: terminal.cols,
+          rows: terminal.rows
+        });
+      } catch {
+        // xterm can throw while the surface is being unmounted or hidden.
+      }
     };
 
     const focusTerminal = (event: MouseEvent): void => {
@@ -122,6 +133,27 @@ export function TerminalSurface({
       }
     };
     host.addEventListener("mousedown", focusTerminal);
+
+    const applyFontSize = (nextFontSize: number): void => {
+      terminal.options.fontSize = nextFontSize;
+      window.setTimeout(() => fitAndResize(), 0);
+    };
+
+    const handleWheel = (event: WheelEvent): void => {
+      if (!event.ctrlKey) {
+        return;
+      }
+      event.preventDefault();
+      setFontSize((currentFontSize) => {
+        const nextFontSize = Math.min(
+          maxTerminalFontSize,
+          Math.max(minTerminalFontSize, currentFontSize + (event.deltaY < 0 ? 1 : -1))
+        );
+        applyFontSize(nextFontSize);
+        return nextFontSize;
+      });
+    };
+    host.addEventListener("wheel", handleWheel, { passive: false });
 
     const selectionChangeDisposable = terminal.onSelectionChange(() => {
       const selection = terminal.getSelection();
@@ -260,6 +292,7 @@ export function TerminalSurface({
     return () => {
       resizeObserver.disconnect();
       host.removeEventListener("mousedown", focusTerminal);
+      host.removeEventListener("wheel", handleWheel);
       host.removeEventListener("contextmenu", handleTerminalContextMenu, { capture: true });
       document.removeEventListener("click", handleTerminalClick, true);
       inputDisposable.dispose();
@@ -278,16 +311,60 @@ export function TerminalSurface({
     };
   }, [cwd, sessionId, shell]);
 
+  const adjustFontSize = (delta: number): void => {
+    setFontSize((currentFontSize) => {
+      const nextFontSize = Math.min(maxTerminalFontSize, Math.max(minTerminalFontSize, currentFontSize + delta));
+      const terminal = terminalRef.current;
+      const fitAddon = fitAddonRef.current;
+      if (terminal && fitAddon) {
+        terminal.options.fontSize = nextFontSize;
+        window.setTimeout(() => {
+          try {
+            fitAddon.fit();
+            window.wmux?.terminal.resize({
+              id: sessionId,
+              cols: terminal.cols,
+              rows: terminal.rows
+            });
+          } catch {
+            // Ignore resize races during surface transitions.
+          }
+        }, 0);
+      }
+      return nextFontSize;
+    });
+  };
+
   return (
     <div className="terminalSurface">
       <div className="terminalHeader">
         <span className="terminalPrompt">
-          <Code2 size={14} />
-          {surface.subtitle}
+          <Code2 size={13} />
+          <span className="terminalPromptText">{surface.subtitle || shell}</span>
         </span>
         <span className="terminalState">
-          <Activity size={13} />
+          <Activity size={12} />
           {statusLabels[surface.status]}
+        </span>
+        <span className="terminalFontControls">
+          <button
+            className="iconButton"
+            type="button"
+            aria-label="Decrease terminal font size"
+            title="Decrease font size (Ctrl+Scroll)"
+            onClick={() => adjustFontSize(-1)}
+          >
+            <Minus size={10} />
+          </button>
+          <button
+            className="iconButton"
+            type="button"
+            aria-label="Increase terminal font size"
+            title="Increase font size (Ctrl+Scroll)"
+            onClick={() => adjustFontSize(1)}
+          >
+            <Plus size={10} />
+          </button>
         </span>
       </div>
       <div className="terminalHost" ref={hostRef} />
