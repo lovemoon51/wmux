@@ -27,8 +27,8 @@
 
 body {
   margin: 0;
-  min-width: 980px;
-  min-height: 640px;
+  min-width: 800px;
+  min-height: 600px;
   overflow: hidden;
   background: var(--bg-app);
   color: var(--text-primary);
@@ -37,15 +37,25 @@ body {
 button {
   color: inherit;
   font: inherit;
+  cursor: pointer;
 }
+
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ─── App Shell ─────────────────────────────────────── */
 
 .appShell {
   display: grid;
-  grid-template-columns: 276px minmax(0, 1fr);
+  grid-template-columns: 260px minmax(0, 1fr);
   width: 100vw;
   height: 100vh;
   background: var(--bg-app);
 }
+
+/* ─── Sidebar ────────────────────────────────────────── */
 
 .sidebar {
   display: flex;
@@ -53,36 +63,39 @@ button {
   flex-direction: column;
   border-right: 1px solid var(--border-subtle);
   background: var(--bg-sidebar);
-  padding: 14px 12px;
+  padding: 12px 10px;
+  overflow: hidden;
 }
 
 .brandRow {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 42px;
+  height: 40px;
+  flex-shrink: 0;
 }
 
 .brandMark {
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   place-items: center;
   border: 1px solid var(--border-strong);
   border-radius: 7px;
   background: #1d232b;
   color: var(--accent);
+  flex-shrink: 0;
 }
 
 .brandName {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
 }
 
 .brandSub {
   margin-top: 1px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .searchButton,
@@ -91,7 +104,7 @@ button {
 .commandButton {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--bg-control);
@@ -100,10 +113,19 @@ button {
 .searchButton {
   justify-content: flex-start;
   width: 100%;
-  height: 34px;
-  margin-top: 14px;
-  padding: 0 9px;
+  height: 32px;
+  margin-top: 12px;
+  padding: 0 8px;
   color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.searchButton span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  flex: 1;
 }
 
 kbd {
@@ -113,29 +135,32 @@ kbd {
   padding: 1px 5px;
   color: var(--text-muted);
   font-size: 10px;
+  flex-shrink: 0;
 }
 
 .sidebarSectionHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: 18px 2px 8px;
+  margin: 16px 2px 7px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+  flex-shrink: 0;
 }
 
 .iconButton {
   display: inline-grid;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   place-items: center;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-secondary);
+  flex-shrink: 0;
 }
 
 .iconButton:hover,
@@ -158,20 +183,33 @@ kbd {
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  gap: 7px;
-  overflow: auto;
+  gap: 5px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(112, 121, 135, 0.3) transparent;
+}
+
+.workspaceList::-webkit-scrollbar {
+  width: 4px;
+}
+
+.workspaceList::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(112, 121, 135, 0.3);
 }
 
 .workspaceItem {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px;
+  gap: 4px;
   align-items: stretch;
   width: 100%;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: 6px;
   background: transparent;
-  padding: 5px;
+  padding: 4px;
+  flex-shrink: 0;
 }
 
 .workspaceItem:hover {
@@ -186,11 +224,11 @@ kbd {
 .workspaceSelect {
   display: grid;
   min-width: 0;
-  grid-template-columns: 14px minmax(0, 1fr);
-  gap: 9px;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 8px;
   border: 0;
   background: transparent;
-  padding: 5px 4px;
+  padding: 4px 3px;
   cursor: default;
   text-align: left;
 }
@@ -198,9 +236,10 @@ kbd {
 .workspaceActions {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   opacity: 0;
   transition: opacity 120ms ease;
+  flex-shrink: 0;
 }
 
 .workspaceItem:hover .workspaceActions,
@@ -211,8 +250,8 @@ kbd {
 
 .workspaceActionButton {
   display: inline-grid;
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   place-items: center;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
@@ -234,19 +273,21 @@ kbd {
 .statusRing {
   width: 10px;
   height: 10px;
-  margin-top: 4px;
+  margin-top: 3px;
   border: 2px solid currentColor;
   border-radius: 999px;
   color: var(--text-muted);
+  flex-shrink: 0;
 }
 
 .statusDot,
 .tabStatus {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 999px;
   background: currentColor;
   color: var(--text-muted);
+  flex-shrink: 0;
 }
 
 .statusIdle {
@@ -255,6 +296,12 @@ kbd {
 
 .statusRunning {
   color: var(--accent);
+  animation: pulse-running 2s ease-in-out infinite;
+}
+
+@keyframes pulse-running {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 
 .statusAttention {
@@ -278,18 +325,18 @@ kbd {
 
 .workspaceMain {
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
 }
 
 .workspaceTitleRow {
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
 }
 
 .workspaceName {
   overflow: hidden;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -298,14 +345,14 @@ kbd {
 .workspaceNameInput {
   min-width: 0;
   width: 100%;
-  height: 21px;
+  height: 20px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   outline: 0;
   background: #101419;
   color: var(--text-primary);
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 650;
   padding: 0 5px;
 }
@@ -320,7 +367,7 @@ kbd {
 .workspaceNotice {
   overflow: hidden;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -331,38 +378,79 @@ kbd {
 
 .workspaceMeta {
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 4px;
 }
 
 .metaPill {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   border: 1px solid #303844;
   border-radius: 4px;
-  padding: 1px 5px;
+  padding: 1px 4px;
   color: var(--text-secondary);
   font-size: 10px;
 }
 
+.metaPillPort {
+  border-color: #2a3f4a;
+  background: #182028;
+  color: #5ab8d8;
+}
+
+.metaPillBranch {
+  border-color: #2e3a28;
+  background: #1a2218;
+  color: #7dc26a;
+}
+
+/* ─── Sidebar Footer ─────────────────────────────────── */
+
 .sidebarFooter {
   display: grid;
-  gap: 7px;
+  gap: 5px;
   border-top: 1px solid var(--border-subtle);
-  padding-top: 10px;
+  padding-top: 8px;
+  flex-shrink: 0;
 }
 
 .utilityButton {
-  height: 32px;
-  padding: 0 9px;
+  height: 30px;
+  padding: 0 8px;
   color: var(--text-secondary);
+  font-size: 12px;
 }
+
+.utilityButtonActive {
+  border-color: var(--accent) !important;
+  background: rgba(61, 174, 233, 0.1) !important;
+  color: var(--accent) !important;
+}
+
+.notificationBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--attention);
+  color: #0f1115;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 4px;
+  margin-left: auto;
+}
+
+/* ─── Workspace Area ─────────────────────────────────── */
 
 .workspaceArea {
   display: grid;
   min-width: 0;
-  grid-template-rows: 58px minmax(0, 1fr);
+  grid-template-rows: 52px minmax(0, 1fr);
 }
+
+/* ─── Title Bar ──────────────────────────────────────── */
 
 .titleBar {
   display: flex;
@@ -370,7 +458,9 @@ kbd {
   justify-content: space-between;
   border-bottom: 1px solid var(--border-subtle);
   background: #111419;
-  padding: 0 14px;
+  padding: 0 12px;
+  gap: 8px;
+  overflow: hidden;
 }
 
 .trafficSpacer {
@@ -381,20 +471,26 @@ kbd {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  flex: 1;
+  overflow: hidden;
 }
 
 .titleIdentity h1 {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+  max-width: 200px;
 }
 
 .titleIdentity p {
   overflow: hidden;
-  max-width: 520px;
-  margin: 2px 0 0;
+  margin: 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -402,15 +498,17 @@ kbd {
 .titleActions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
+  flex-shrink: 0;
 }
 
 .commandButton,
 .toolbarButton,
 .shellSelectLabel {
-  height: 32px;
-  padding: 0 10px;
+  height: 28px;
+  padding: 0 8px;
   color: var(--text-secondary);
+  font-size: 12px;
 }
 
 .commandButton {
@@ -420,20 +518,21 @@ kbd {
 .shellSelectLabel {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--bg-control);
 }
 
 .shellSelectLabel select {
-  max-width: 132px;
+  max-width: 110px;
   border: 0;
   outline: 0;
   background: transparent;
   color: var(--text-secondary);
   font: inherit;
-  font-size: 12px;
+  font-size: 11px;
+  cursor: pointer;
 }
 
 .shellSelectLabel option {
@@ -443,15 +542,20 @@ kbd {
 
 .versionText {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 10px;
+  flex-shrink: 0;
 }
+
+/* ─── Surface Stage ──────────────────────────────────── */
 
 .surfaceStage {
   display: grid;
   min-width: 0;
   min-height: 0;
-  padding: 10px;
+  padding: 8px;
 }
+
+/* ─── Split Layout ───────────────────────────────────── */
 
 .split {
   display: grid;
@@ -462,17 +566,18 @@ kbd {
 }
 
 .split-horizontal {
-  grid-template-columns: minmax(240px, var(--split-ratio)) 5px minmax(240px, 1fr);
+  grid-template-columns: minmax(200px, var(--split-ratio)) 5px minmax(200px, 1fr);
 }
 
 .split-vertical {
-  grid-template-rows: minmax(180px, var(--split-ratio)) 5px minmax(160px, 1fr);
+  grid-template-rows: minmax(160px, var(--split-ratio)) 5px minmax(140px, 1fr);
 }
 
 .splitHandle {
   border-radius: 8px;
   background: transparent;
   touch-action: none;
+  transition: background 150ms ease;
 }
 
 .split-horizontal > .splitHandle {
@@ -484,8 +589,10 @@ kbd {
 }
 
 .splitHandle:hover {
-  background: #303844;
+  background: #3a4555;
 }
+
+/* ─── Pane ───────────────────────────────────────────── */
 
 .pane {
   position: relative;
@@ -495,44 +602,46 @@ kbd {
   height: 100%;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: 34px minmax(0, 1fr);
+  grid-template-rows: 32px minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid var(--border-subtle);
-  border-radius: 7px;
+  border-radius: 6px;
   background: var(--bg-pane);
 }
 
 .paneActive {
   z-index: 1;
   border-color: #4b647a;
-  box-shadow: 0 0 0 1px rgba(61, 174, 233, 0.16);
+  box-shadow: 0 0 0 1px rgba(61, 174, 233, 0.14);
 }
 
 .paneDrop::after {
   position: absolute;
   z-index: 4;
-  border: 1px solid rgba(61, 174, 233, 0.9);
+  border: 2px solid rgba(61, 174, 233, 0.9);
   border-radius: 5px;
-  background: rgba(61, 174, 233, 0.16);
+  background: rgba(61, 174, 233, 0.12);
   content: "";
   pointer-events: none;
 }
 
 .paneDrop-left::after {
-  inset: 34px 50% 0 0;
+  inset: 32px 50% 0 0;
 }
 
 .paneDrop-right::after {
-  inset: 34px 0 0 50%;
+  inset: 32px 0 0 50%;
 }
 
 .paneDrop-top::after {
-  inset: 34px 0 50% 0;
+  inset: 32px 0 50% 0;
 }
 
 .paneDrop-bottom::after {
-  inset: calc(50% + 17px) 0 0 0;
+  inset: calc(50% + 16px) 0 0 0;
 }
+
+/* ─── Surface Body Stack ─────────────────────────────── */
 
 .surfaceBodyStack {
   position: relative;
@@ -558,36 +667,45 @@ kbd {
   pointer-events: auto;
 }
 
+/* ─── Surface Tabs ───────────────────────────────────── */
+
 .surfaceTabs {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   overflow: hidden;
   border-bottom: 1px solid var(--border-subtle);
-  background: #15191f;
-  padding: 4px;
+  background: #14181e;
+  padding: 3px;
 }
 
 .surfaceTab {
   display: inline-flex;
   min-width: 0;
-  max-width: 190px;
-  height: 25px;
+  max-width: 160px;
+  height: 24px;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
-  padding: 0 7px;
+  padding: 0 6px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 11px;
+  flex-shrink: 0;
+  transition: background 100ms ease;
 }
 
 .surfaceTab span:last-of-type {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.surfaceTab:hover {
+  background: #1e242c;
+  color: var(--text-primary);
 }
 
 .surfaceTabActive {
@@ -603,21 +721,29 @@ kbd {
 .tabCloseButton {
   display: inline-grid;
   flex: none;
-  width: 17px;
-  height: 17px;
+  width: 15px;
+  height: 15px;
   place-items: center;
   border-radius: 3px;
+  opacity: 0.6;
+  transition: opacity 100ms;
+}
+
+.surfaceTab:hover .tabCloseButton,
+.surfaceTabActive .tabCloseButton {
+  opacity: 1;
 }
 
 .tabCloseButton:hover {
-  background: #303844;
+  background: #3a4555;
+  opacity: 1;
 }
 
 .surfaceAdd {
   display: inline-grid;
   flex: none;
-  width: 25px;
-  height: 25px;
+  width: 24px;
+  height: 24px;
   place-items: center;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
@@ -625,13 +751,56 @@ kbd {
   color: var(--text-secondary);
 }
 
+/* ─── Surface Add Menu ───────────────────────────────── */
+
+.surfaceAddWrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.surfaceAddMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 140px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: #1b2028;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  padding: 4px;
+}
+
+.surfaceAddMenuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  padding: 0 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: left;
+}
+
+.surfaceAddMenuItem:hover {
+  border-color: var(--border-strong);
+  background: #252b34;
+  color: var(--text-primary);
+}
+
 .paneCloseButton {
   position: relative;
   z-index: 1;
   display: inline-grid;
   flex: none;
-  width: 25px;
-  height: 25px;
+  width: 24px;
+  height: 24px;
   margin-left: auto;
   place-items: center;
   border: 1px solid transparent;
@@ -646,6 +815,68 @@ kbd {
   color: var(--text-secondary);
 }
 
+/* ─── Empty Pane ─────────────────────────────────────── */
+
+.emptyPane {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  width: 100%;
+  height: 100%;
+  padding: 24px;
+  color: var(--text-muted);
+}
+
+.emptyPaneTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.emptyPaneActions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.emptyPaneAction {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 88px;
+  padding: 14px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: #181d24;
+  color: var(--text-secondary);
+  font-size: 11px;
+  transition: border-color 150ms, background 150ms;
+}
+
+.emptyPaneAction:hover {
+  border-color: var(--accent);
+  background: rgba(61, 174, 233, 0.07);
+  color: var(--accent);
+}
+
+.emptyPaneActionIcon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: #1d232b;
+  color: var(--accent);
+}
+
+/* ─── Terminal Surface ───────────────────────────────── */
+
 .terminalSurface {
   display: grid;
   width: 100%;
@@ -653,34 +884,44 @@ kbd {
   min-width: 0;
   min-height: 0;
   background: var(--bg-pane);
-}
-
-.terminalSurface {
-  grid-template-rows: 32px minmax(0, 1fr);
+  grid-template-rows: 28px minmax(0, 1fr);
 }
 
 .terminalHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid #1f252d;
+  border-bottom: 1px solid #1a1f27;
   padding: 0 10px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 10px;
+  gap: 8px;
 }
 
 .terminalPrompt,
 .terminalState {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+  overflow: hidden;
+}
+
+.terminalPrompt {
+  flex: 1;
+  min-width: 0;
+}
+
+.terminalPromptText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .terminalHost {
   overflow: auto;
   min-width: 0;
   min-height: 0;
-  padding: 8px 10px;
+  padding: 6px 8px;
   color: #d7dee7;
   scrollbar-color: rgba(112, 121, 135, 0.34) transparent;
   scrollbar-width: thin;
@@ -689,8 +930,8 @@ kbd {
 .terminalHost::-webkit-scrollbar,
 .terminalHost .xterm-viewport::-webkit-scrollbar,
 .terminalHost .xterm-scrollable-element::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
 }
 
 .terminalHost::-webkit-scrollbar-track,
@@ -711,7 +952,7 @@ kbd {
 .terminalHost:hover::-webkit-scrollbar-thumb,
 .terminalHost:hover .xterm-viewport::-webkit-scrollbar-thumb,
 .terminalHost:hover .xterm-scrollable-element::-webkit-scrollbar-thumb {
-  background: rgba(169, 177, 189, 0.58);
+  background: rgba(169, 177, 189, 0.55);
   background-clip: padding-box;
 }
 
@@ -726,7 +967,7 @@ kbd {
 }
 
 .terminalHost .xterm .xterm-scrollable-element > .scrollbar {
-  width: 8px !important;
+  width: 7px !important;
   background: transparent !important;
 }
 
@@ -738,8 +979,10 @@ kbd {
 .terminalHost:hover .xterm .xterm-scrollable-element > .scrollbar > .slider,
 .terminalHost .xterm .xterm-scrollable-element > .scrollbar > .slider:hover,
 .terminalHost .xterm .xterm-scrollable-element > .scrollbar > .slider.active {
-  background: rgba(169, 177, 189, 0.58) !important;
+  background: rgba(169, 177, 189, 0.55) !important;
 }
+
+/* ─── Browser Surface ────────────────────────────────── */
 
 .browserSurface {
   display: grid;
@@ -747,7 +990,7 @@ kbd {
   height: 100%;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: 36px minmax(0, 1fr);
+  grid-template-rows: 34px minmax(0, 1fr);
   overflow: hidden;
   background: var(--bg-pane);
 }
@@ -756,24 +999,29 @@ kbd {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 5px;
-  border-bottom: 1px solid #1f252d;
-  padding: 4px 6px;
+  gap: 4px;
+  border-bottom: 1px solid #1a1f27;
+  padding: 3px 5px;
 }
 
 .addressField {
   display: flex;
   min-width: 0;
-  height: 28px;
+  height: 26px;
   flex: 1;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  background: #0f1216;
-  padding: 0 8px;
+  background: #0d1014;
+  padding: 0 7px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 11px;
+  transition: border-color 150ms;
+}
+
+.addressField:focus-within {
+  border-color: var(--accent);
 }
 
 .addressField input {
@@ -784,7 +1032,11 @@ kbd {
   background: transparent;
   color: var(--text-secondary);
   font: inherit;
-  font-size: 12px;
+  font-size: 11px;
+}
+
+.addressField input:focus {
+  color: var(--text-primary);
 }
 
 .addressField input::selection {
@@ -816,86 +1068,21 @@ kbd {
   white-space: nowrap;
 }
 
-.browserPreview {
-  min-width: 0;
-  min-height: 0;
-  overflow: auto;
-  padding: 18px;
-  background: #f3f5f7;
-  color: #1b2430;
+/* ─── Browser Loading Indicator ──────────────────────── */
+
+.browserLoadingBar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 0 1px 1px 0;
+  transition: width 300ms ease, opacity 300ms ease;
+  z-index: 5;
+  pointer-events: none;
 }
 
-.previewTopline {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: #536171;
-  font-size: 12px;
-}
-
-.previewHero {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-top: 18px;
-  border: 1px solid #d9e0e7;
-  border-radius: 7px;
-  background: #ffffff;
-  padding: 18px;
-}
-
-.previewHero svg {
-  color: #237aa8;
-}
-
-.previewHero h2 {
-  margin: 0;
-  font-size: 18px;
-}
-
-.previewHero p {
-  margin: 5px 0 0;
-  color: #637184;
-  font-size: 13px;
-}
-
-.previewGrid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.previewGrid div {
-  display: grid;
-  gap: 4px;
-  border: 1px solid #d9e0e7;
-  border-radius: 6px;
-  background: #ffffff;
-  padding: 12px;
-}
-
-.previewGrid strong {
-  font-size: 13px;
-}
-
-.previewGrid span {
-  color: #637184;
-  font-size: 12px;
-}
-
-.previewAction {
-  display: inline-flex;
-  height: 32px;
-  align-items: center;
-  gap: 7px;
-  margin-top: 14px;
-  border: 1px solid #a9c8d9;
-  border-radius: 5px;
-  background: #e7f4fb;
-  color: #185b7b;
-  padding: 0 10px;
-}
+/* ─── Command Palette ────────────────────────────────── */
 
 .commandPaletteOverlay {
   position: fixed;
@@ -903,20 +1090,20 @@ kbd {
   inset: 0;
   display: grid;
   place-items: start center;
-  background: rgba(4, 7, 12, 0.58);
-  padding-top: 9vh;
+  background: rgba(4, 7, 12, 0.62);
+  padding-top: 8vh;
 }
 
 .commandPalette {
   display: grid;
-  width: min(720px, calc(100vw - 48px));
-  max-height: min(620px, calc(100vh - 120px));
+  width: min(680px, calc(100vw - 40px));
+  max-height: min(580px, calc(100vh - 100px));
   grid-template-rows: auto auto minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid var(--border-strong);
-  border-radius: 12px;
+  border-radius: 10px;
   background: #151a21;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+  box-shadow: 0 20px 64px rgba(0, 0, 0, 0.5);
 }
 
 .commandPaletteHeader {
@@ -924,7 +1111,7 @@ kbd {
   align-items: center;
   gap: 10px;
   border-bottom: 1px solid var(--border-subtle);
-  padding: 13px 14px;
+  padding: 12px 14px;
   color: var(--text-secondary);
 }
 
@@ -936,7 +1123,7 @@ kbd {
   background: transparent;
   color: var(--text-primary);
   font: inherit;
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .commandPaletteHeader input::placeholder {
@@ -949,8 +1136,8 @@ kbd {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border-bottom: 1px solid #202631;
-  padding: 8px 14px;
+  border-bottom: 1px solid #1e2530;
+  padding: 6px 14px;
   color: var(--text-muted);
   font-size: 11px;
 }
@@ -965,52 +1152,54 @@ kbd {
 .commandPaletteList {
   display: grid;
   align-content: start;
-  gap: 5px;
+  gap: 3px;
   min-height: 0;
   overflow: auto;
-  padding: 8px;
+  padding: 6px;
+  scrollbar-width: thin;
 }
 
 .commandPaletteItem {
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) auto;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
-  min-height: 58px;
+  min-height: 52px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 7px;
   background: transparent;
-  padding: 8px 10px;
+  padding: 7px 9px;
   text-align: left;
+  transition: background 100ms;
 }
 
 .commandPaletteItemActive,
 .commandPaletteItem:hover {
   border-color: #385064;
-  background: #202833;
+  background: #1e2832;
 }
 
 .commandPaletteItemIcon {
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   place-items: center;
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 7px;
   color: var(--accent);
 }
 
 .commandPaletteItemMain {
   display: grid;
   min-width: 0;
-  gap: 4px;
+  gap: 3px;
 }
 
 .commandPaletteItemTitle {
   overflow: hidden;
   color: var(--text-primary);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1026,36 +1215,337 @@ kbd {
 .commandPaletteItemMeta {
   border: 1px solid var(--border-subtle);
   border-radius: 999px;
-  padding: 2px 8px;
+  padding: 2px 7px;
   color: var(--text-secondary);
   font-size: 10px;
+  flex-shrink: 0;
 }
 
 .commandPaletteEmpty {
-  padding: 28px 12px;
+  padding: 32px 12px;
   color: var(--text-muted);
   text-align: center;
+  font-size: 13px;
 }
 
+.commandPaletteSection {
+  padding: 4px 9px 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ─── Notification Panel ─────────────────────────────── */
+
+.notificationOverlay {
+  position: fixed;
+  z-index: 15;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  padding: 0 0 8px 268px;
+  pointer-events: none;
+}
+
+.notificationPanel {
+  width: 320px;
+  max-height: 420px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: #151a21;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+.notificationPanelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.notificationList {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  scrollbar-width: thin;
+}
+
+.notificationItem {
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #1a1f27;
+}
+
+.notificationItem:hover {
+  border-color: var(--border-subtle);
+}
+
+.notificationDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--attention);
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+.notificationContent {
+  flex: 1;
+  min-width: 0;
+}
+
+.notificationTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notificationBody {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notificationTime {
+  font-size: 10px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.notificationEmpty {
+  padding: 24px 12px;
+  color: var(--text-muted);
+  text-align: center;
+  font-size: 12px;
+}
+
+/* ─── Settings Panel ─────────────────────────────────── */
+
+.settingsOverlay {
+  position: fixed;
+  z-index: 18;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  padding: 0 0 8px 268px;
+  pointer-events: none;
+}
+
+.settingsPanel {
+  width: 340px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: #151a21;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+.settingsPanelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settingsList {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settingsSection {
+  padding: 8px 6px 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.settingsRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.settingsRow:hover {
+  background: #1a1f27;
+}
+
+.settingsLabel {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.settingsDesc {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.settingsSelect {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-control);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 6px;
+  outline: 0;
+  cursor: pointer;
+}
+
+.settingsSelect:focus {
+  border-color: var(--accent);
+}
+
+.settingsSelect option {
+  background: #1b1f26;
+  color: var(--text-primary);
+}
+
+.settingsToggle {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.settingsToggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.settingsToggleTrack {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--border-strong);
+  cursor: pointer;
+  transition: background 200ms;
+}
+
+.settingsToggle input:checked + .settingsToggleTrack {
+  background: var(--accent);
+}
+
+.settingsToggleThumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: white;
+  transition: transform 200ms;
+}
+
+.settingsToggle input:checked ~ .settingsToggleThumb {
+  transform: translateX(14px);
+}
+
+.settingsWarning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 8px 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(239, 107, 115, 0.3);
+  border-radius: var(--radius-sm);
+  background: rgba(239, 107, 115, 0.08);
+  color: var(--danger);
+  font-size: 11px;
+}
+
+/* ─── Keyboard Shortcuts Hint ────────────────────────── */
+
+.shortcutHint {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.shortcutHint kbd {
+  margin-left: 0;
+  font-size: 9px;
+}
+
+/* ─── Responsive Breakpoints ─────────────────────────── */
+
 @media (max-width: 1280px) {
+  .appShell {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+
+  .notificationOverlay,
+  .settingsOverlay {
+    padding-left: 248px;
+  }
+
+  .titleIdentity h1 {
+    max-width: 160px;
+  }
+
   .titleIdentity p {
-    max-width: 320px;
+    max-width: 240px;
   }
 
   .titleActions {
-    gap: 5px;
+    gap: 4px;
   }
 
   .toolbarButton,
   .commandButton,
   .shellSelectLabel {
-    padding: 0 8px;
+    padding: 0 7px;
   }
 }
 
-@media (max-width: 1120px) {
+@media (max-width: 1100px) {
   .appShell {
-    grid-template-columns: 238px minmax(0, 1fr);
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+
+  .notificationOverlay,
+  .settingsOverlay {
+    padding-left: 228px;
   }
 
   .toolbarButton span,
@@ -1064,6 +1554,25 @@ kbd {
   }
 
   .shellSelectLabel select {
-    max-width: 86px;
+    max-width: 80px;
+  }
+
+  .versionText {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .appShell {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+
+  .notificationOverlay,
+  .settingsOverlay {
+    padding-left: 208px;
+  }
+
+  .titleIdentity h1 {
+    max-width: 120px;
   }
 }

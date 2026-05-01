@@ -7,6 +7,7 @@ import {
   GitBranch,
   Globe,
   LayoutGrid,
+  Minus,
   Pencil,
   Plus,
   RefreshCw,
@@ -62,6 +63,17 @@ import type {
   WorkspaceSummary
 } from "@shared/types";
 import { TerminalSurface } from "./components/TerminalSurface";
+
+
+// ─── Notification type ────────────────────────────────────────────────────────
+
+type AppNotification = {
+  id: string;
+  title: string;
+  body?: string;
+  workspaceId?: string;
+  at: number;
+};
 
 let nextSurfaceNumber = 1;
 let nextWorkspaceNumber = 1;
@@ -1288,14 +1300,22 @@ export function App(): ReactElement {
   const [commandQuery, setCommandQuery] = useState("");
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [pendingTerminalCommands, setPendingTerminalCommands] = useState<PendingTerminalCommand[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [securityMode, setSecurityMode] = useState<string>("wmuxOnly");
+  const [allowAllWarning, setAllowAllWarning] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     void window.wmux?.getVersion().then(setAppVersion).catch(() => setAppVersion("dev"));
     void window.wmux?.getSecurityState?.()
       .then((state) => {
-        if (state?.mode !== "allowAll" || !state.warning) {
+        if (!state) return;
+        setSecurityMode(state.mode);
+        if (state.mode !== "allowAll" || !state.warning) {
           return;
         }
+        setAllowAllWarning(state.warning);
         setWorkspaces((items) =>
           items.map((workspace, index) =>
             index === 0
@@ -1433,20 +1453,33 @@ export function App(): ReactElement {
 
   useEffect(() => {
     const handleGlobalKeyDown = (event: KeyboardEvent): void => {
-      const isCommandShortcut = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k";
-      if (!isCommandShortcut) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setCommandPaletteOpen(true);
+        setCommandQuery("");
+        setSelectedCommandIndex(0);
         return;
       }
-
-      event.preventDefault();
-      setCommandPaletteOpen(true);
-      setCommandQuery("");
-      setSelectedCommandIndex(0);
+      if (event.key === "Escape") {
+        setNotificationOpen(false);
+        setSettingsOpen(false);
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "t") {
+        event.preventDefault();
+        handleAddTerminalSurface(activeWorkspace.activePaneId);
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "b") {
+        event.preventDefault();
+        handleAddBrowserSurface(activeWorkspace.activePaneId);
+        return;
+      }
     };
 
     window.addEventListener("keydown", handleGlobalKeyDown);
     return () => window.removeEventListener("keydown", handleGlobalKeyDown);
-  }, []);
+  }, [activeWorkspace.activePaneId]);
 
   useEffect(() => {
     if (!pendingTerminalCommands.length) {
@@ -1597,6 +1630,16 @@ export function App(): ReactElement {
           window.wmux?.socket.respond(createSocketErrorResponse(request.id, "BAD_REQUEST", "notify 需要 title"));
           return;
         }
+        setNotifications((prev) => [
+          {
+            id: `notif-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            title: params.title as string,
+            body: typeof params.body === "string" ? params.body : undefined,
+            workspaceId: typeof params.workspaceId === "string" ? params.workspaceId : undefined,
+            at: Date.now()
+          },
+          ...prev.slice(0, 49)
+        ]);
 
         const targetWorkspaceId = params.workspaceId ?? currentActiveWorkspaceId;
         const notice = params.body?.trim() ? `${params.title}: ${params.body}` : params.title;
@@ -1982,6 +2025,9 @@ export function App(): ReactElement {
         activeWorkspaceId={activeWorkspace.id}
         editingWorkspaceId={editingWorkspaceId}
         workspaceNameDraft={workspaceNameDraft}
+        notificationCount={notifications.length}
+        notificationOpen={notificationOpen}
+        settingsOpen={settingsOpen}
         onSelect={setActiveWorkspaceId}
         onCreate={handleCreateWorkspace}
         onStartRename={handleStartRenameWorkspace}
@@ -1990,6 +2036,8 @@ export function App(): ReactElement {
         onCancelRename={handleCancelRenameWorkspace}
         onClose={handleCloseWorkspace}
         onOpenCommandPalette={openCommandPalette}
+        onToggleNotifications={() => { setNotificationOpen((v) => !v); setSettingsOpen(false); }}
+        onToggleSettings={() => { setSettingsOpen((v) => !v); setNotificationOpen(false); }}
       />
       <section className="workspaceArea">
         <TitleBar
@@ -2010,6 +2058,7 @@ export function App(): ReactElement {
             node={activeWorkspace.layout}
             shellProfile={shellProfile}
             onAddTerminalSurface={handleAddTerminalSurface}
+            onAddBrowserSurface={handleAddBrowserSurface}
             onSelectSurface={handleSelectSurface}
             onCloseSurface={handleCloseSurface}
             onActivatePane={(paneId) => updateActiveWorkspace((workspace) => ({ ...workspace, activePaneId: paneId }))}
@@ -2035,6 +2084,20 @@ export function App(): ReactElement {
         onRun={runProjectCommand}
         onSelectedIndexChange={setSelectedCommandIndex}
       />
+      {notificationOpen && (
+        <NotificationPanel
+          notifications={notifications}
+          onClose={() => setNotificationOpen(false)}
+          onClear={() => setNotifications([])}
+        />
+      )}
+      {settingsOpen && (
+        <SettingsPanel
+          securityMode={securityMode}
+          allowAllWarning={allowAllWarning}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
     </main>
   );
 }
@@ -2167,6 +2230,9 @@ function WorkspaceSidebar({
   activeWorkspaceId,
   editingWorkspaceId,
   workspaceNameDraft,
+  notificationCount,
+  notificationOpen,
+  settingsOpen,
   onSelect,
   onCreate,
   onStartRename,
@@ -2174,12 +2240,17 @@ function WorkspaceSidebar({
   onCommitRename,
   onCancelRename,
   onClose,
-  onOpenCommandPalette
+  onOpenCommandPalette,
+  onToggleNotifications,
+  onToggleSettings
 }: {
   workspaces: Workspace[];
   activeWorkspaceId: string;
   editingWorkspaceId: string | null;
   workspaceNameDraft: string;
+  notificationCount: number;
+  notificationOpen: boolean;
+  settingsOpen: boolean;
   onSelect: (id: string) => void;
   onCreate: () => void;
   onStartRename: (workspace: Workspace) => void;
@@ -2188,6 +2259,8 @@ function WorkspaceSidebar({
   onCancelRename: () => void;
   onClose: (id: string) => void;
   onOpenCommandPalette: () => void;
+  onToggleNotifications: () => void;
+  onToggleSettings: () => void;
 }): ReactElement {
   return (
     <aside className="sidebar">
@@ -2267,13 +2340,13 @@ function WorkspaceSidebar({
                   <span className="workspacePath">{workspace.cwd}</span>
                   <span className="workspaceMeta">
                     {workspace.branch && (
-                      <span className="metaPill">
-                        <GitBranch size={12} />
+                      <span className="metaPill metaPillBranch">
+                        <GitBranch size={11} />
                         {workspace.branch}
                       </span>
                     )}
                     {workspace.ports.map((port) => (
-                      <span className="metaPill" key={port}>
+                      <span className="metaPill metaPillPort" key={port}>
                         :{port}
                       </span>
                     ))}
@@ -2308,12 +2381,25 @@ function WorkspaceSidebar({
       </div>
 
       <div className="sidebarFooter">
-        <button className="utilityButton" type="button">
-          <Bell size={15} />
+        <button
+          className={`utilityButton ${notificationOpen ? "utilityButtonActive" : ""}`}
+          type="button"
+          aria-label="Notifications"
+          onClick={onToggleNotifications}
+        >
+          <Bell size={14} />
           <span>Notifications</span>
+          {notificationCount > 0 && (
+            <span className="notificationBadge">{notificationCount > 9 ? "9+" : notificationCount}</span>
+          )}
         </button>
-        <button className="utilityButton" type="button">
-          <Settings size={15} />
+        <button
+          className={`utilityButton ${settingsOpen ? "utilityButtonActive" : ""}`}
+          type="button"
+          aria-label="Settings"
+          onClick={onToggleSettings}
+        >
+          <Settings size={14} />
           <span>Settings</span>
         </button>
       </div>
@@ -2399,6 +2485,7 @@ function LayoutRenderer({
   node,
   shellProfile,
   onAddTerminalSurface,
+  onAddBrowserSurface,
   onSelectSurface,
   onCloseSurface,
   onActivatePane,
@@ -2411,6 +2498,7 @@ function LayoutRenderer({
   node: LayoutNode;
   shellProfile: ShellProfile;
   onAddTerminalSurface: (paneId: string) => void;
+  onAddBrowserSurface: (paneId: string) => void;
   onSelectSurface: (paneId: string, surfaceId: string) => void;
   onCloseSurface: (paneId: string, surfaceId: string) => void;
   onActivatePane: (paneId: string) => void;
@@ -2426,6 +2514,7 @@ function LayoutRenderer({
         paneId={node.id}
         shellProfile={shellProfile}
         onAddTerminalSurface={onAddTerminalSurface}
+        onAddBrowserSurface={onAddBrowserSurface}
         onSelectSurface={onSelectSurface}
         onCloseSurface={onCloseSurface}
         onActivatePane={onActivatePane}
@@ -2450,6 +2539,7 @@ function LayoutRenderer({
         node={node.children[0]}
         shellProfile={shellProfile}
         onAddTerminalSurface={onAddTerminalSurface}
+        onAddBrowserSurface={onAddBrowserSurface}
         onSelectSurface={onSelectSurface}
         onCloseSurface={onCloseSurface}
         onActivatePane={onActivatePane}
@@ -2464,6 +2554,7 @@ function LayoutRenderer({
         node={node.children[1]}
         shellProfile={shellProfile}
         onAddTerminalSurface={onAddTerminalSurface}
+        onAddBrowserSurface={onAddBrowserSurface}
         onSelectSurface={onSelectSurface}
         onCloseSurface={onCloseSurface}
         onActivatePane={onActivatePane}
@@ -2527,6 +2618,7 @@ function PaneView({
   paneId,
   shellProfile,
   onAddTerminalSurface,
+  onAddBrowserSurface,
   onSelectSurface,
   onCloseSurface,
   onActivatePane,
@@ -2538,6 +2630,7 @@ function PaneView({
   paneId: string;
   shellProfile: ShellProfile;
   onAddTerminalSurface: (paneId: string) => void;
+  onAddBrowserSurface: (paneId: string) => void;
   onSelectSurface: (paneId: string, surfaceId: string) => void;
   onCloseSurface: (paneId: string, surfaceId: string) => void;
   onActivatePane: (paneId: string) => void;
@@ -2587,7 +2680,8 @@ function PaneView({
         surfaces={surfaces}
         activeSurfaceId={activeSurface.id}
         canClose={surfaces.length > 1}
-        onAdd={() => onAddTerminalSurface(paneId)}
+        onAddTerminal={() => onAddTerminalSurface(paneId)}
+        onAddBrowser={() => onAddBrowserSurface(paneId)}
         onSelect={(surfaceId) => {
           onActivatePane(paneId);
           onSelectSurface(paneId, surfaceId);
@@ -2623,7 +2717,8 @@ function SurfaceTabs({
   surfaces,
   activeSurfaceId,
   canClose,
-  onAdd,
+  onAddTerminal,
+  onAddBrowser,
   onSelect,
   onClose,
   onClosePane,
@@ -2632,12 +2727,27 @@ function SurfaceTabs({
   surfaces: Surface[];
   activeSurfaceId: string;
   canClose: boolean;
-  onAdd: () => void;
+  onAddTerminal: () => void;
+  onAddBrowser: () => void;
   onSelect: (surfaceId: string) => void;
   onClose: (surfaceId: string) => void;
   onClosePane: () => void;
   onDragSurfaceStart: (surfaceId: string, event: DragEvent<HTMLButtonElement>) => void;
 }): ReactElement {
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const addMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!addMenuOpen) return;
+    const handleClickOutside = (event: MouseEvent): void => {
+      if (addMenuRef.current && !addMenuRef.current.contains(event.target as Node)) {
+        setAddMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [addMenuOpen]);
+
   return (
     <div className="surfaceTabs">
       {surfaces.map((surface) => {
@@ -2653,7 +2763,7 @@ function SurfaceTabs({
             onDragStart={(event) => onDragSurfaceStart(surface.id, event)}
             onClick={() => onSelect(surface.id)}
           >
-            <Icon size={14} />
+            <Icon size={13} />
             <span className={`tabStatus ${statusClass[surface.status]}`} />
             <span>{surface.name}</span>
             {canClose && (
@@ -2675,17 +2785,45 @@ function SurfaceTabs({
                   }
                 }}
               >
-                <X className="tabClose" size={13} aria-hidden="true" />
+                <X className="tabClose" size={12} aria-hidden="true" />
               </span>
             )}
           </button>
         );
       })}
-      <button className="surfaceAdd" type="button" aria-label="Add terminal surface" onClick={onAdd}>
-        <Plus size={14} />
-      </button>
+      <div className="surfaceAddWrapper" ref={addMenuRef}>
+        <button
+          className="surfaceAdd"
+          type="button"
+          aria-label="Add surface"
+          title="Add terminal or browser"
+          onClick={() => setAddMenuOpen((prev) => !prev)}
+        >
+          <Plus size={13} />
+        </button>
+        {addMenuOpen && (
+          <div className="surfaceAddMenu">
+            <button
+              className="surfaceAddMenuItem"
+              type="button"
+              onClick={() => { setAddMenuOpen(false); onAddTerminal(); }}
+            >
+              <Terminal size={13} />
+              Terminal
+            </button>
+            <button
+              className="surfaceAddMenuItem"
+              type="button"
+              onClick={() => { setAddMenuOpen(false); onAddBrowser(); }}
+            >
+              <Globe size={13} />
+              Browser
+            </button>
+          </div>
+        )}
+      </div>
       <button className="paneCloseButton" type="button" aria-label="Close pane" title="Close pane" onClick={onClosePane}>
-        <X size={14} />
+        <X size={13} />
       </button>
     </div>
   );
@@ -3046,6 +3184,146 @@ function BrowserSurface({
               }
             : undefined
         })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Notification Panel ───────────────────────────────────────────────────────
+
+function NotificationPanel({
+  notifications,
+  onClose,
+  onClear
+}: {
+  notifications: AppNotification[];
+  onClose: () => void;
+  onClear: () => void;
+}): ReactElement {
+  const formatTime = (at: number): string => {
+    const diff = Date.now() - at;
+    if (diff < 60_000) return "just now";
+    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+    return `${Math.floor(diff / 3_600_000)}h ago`;
+  };
+
+  return (
+    <div className="notificationOverlay">
+      <div className="notificationPanel">
+        <div className="notificationPanelHeader">
+          <span>Notifications</span>
+          <div style={{ display: "flex", gap: 6 }}>
+            {notifications.length > 0 && (
+              <button className="iconButton" type="button" title="Clear all" onClick={onClear}>
+                <X size={13} />
+              </button>
+            )}
+            <button className="iconButton" type="button" title="Close" onClick={onClose}>
+              <Minus size={13} />
+            </button>
+          </div>
+        </div>
+        <div className="notificationList">
+          {notifications.length === 0 ? (
+            <div className="notificationEmpty">No notifications yet</div>
+          ) : (
+            notifications.map((notif) => (
+              <div className="notificationItem" key={notif.id}>
+                <div className="notificationDot" />
+                <div className="notificationContent">
+                  <div className="notificationTitle">{notif.title}</div>
+                  {notif.body && <div className="notificationBody">{notif.body}</div>}
+                </div>
+                <div className="notificationTime">{formatTime(notif.at)}</div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Settings Panel ───────────────────────────────────────────────────────────
+
+function SettingsPanel({
+  securityMode,
+  allowAllWarning,
+  onClose
+}: {
+  securityMode: string;
+  allowAllWarning?: string;
+  onClose: () => void;
+}): ReactElement {
+  return (
+    <div className="settingsOverlay">
+      <div className="settingsPanel">
+        <div className="settingsPanelHeader">
+          <span>Settings</span>
+          <button className="iconButton" type="button" title="Close" onClick={onClose}>
+            <X size={13} />
+          </button>
+        </div>
+        <div className="settingsList">
+          <div className="settingsSection">Security</div>
+          <div className="settingsRow">
+            <div>
+              <div className="settingsLabel">Socket Security Mode</div>
+              <div className="settingsDesc">Controls who can connect to the local socket</div>
+            </div>
+            <span style={{ fontSize: 11, color: "var(--text-secondary)", padding: "3px 7px", border: "1px solid var(--border-subtle)", borderRadius: 4 }}>
+              {securityMode}
+            </span>
+          </div>
+          {allowAllWarning && (
+            <div className="settingsWarning">
+              <Bell size={13} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>{allowAllWarning}</span>
+            </div>
+          )}
+          <div className="settingsSection">Appearance</div>
+          <div className="settingsRow">
+            <div>
+              <div className="settingsLabel">Theme</div>
+              <div className="settingsDesc">Color scheme for the application</div>
+            </div>
+            <select className="settingsSelect" defaultValue="dark">
+              <option value="dark">Dark</option>
+              <option value="darker">Darker</option>
+            </select>
+          </div>
+          <div className="settingsSection">Shortcuts</div>
+          <div className="settingsRow">
+            <div className="settingsLabel">Command Palette</div>
+            <span style={{ fontSize: 10, color: "var(--text-muted)", display: "flex", gap: 3 }}>
+              <kbd style={{ border: "1px solid var(--border-strong)", borderRadius: 3, padding: "1px 4px" }}>Ctrl</kbd>
+              <kbd style={{ border: "1px solid var(--border-strong)", borderRadius: 3, padding: "1px 4px" }}>K</kbd>
+            </span>
+          </div>
+          <div className="settingsRow">
+            <div className="settingsLabel">New Terminal</div>
+            <span style={{ fontSize: 10, color: "var(--text-muted)", display: "flex", gap: 3 }}>
+              <kbd style={{ border: "1px solid var(--border-strong)", borderRadius: 3, padding: "1px 4px" }}>Ctrl</kbd>
+              <kbd style={{ border: "1px solid var(--border-strong)", borderRadius: 3, padding: "1px 4px" }}>Shift</kbd>
+              <kbd style={{ border: "1px solid var(--border-strong)", borderRadius: 3, padding: "1px 4px" }}>T</kbd>
+            </span>
+          </div>
+          <div className="settingsRow">
+            <div className="settingsLabel">New Browser</div>
+            <span style={{ fontSize: 10, color: "var(--text-muted)", display: "flex", gap: 3 }}>
+              <kbd style={{ border: "1px solid var(--border-strong)", borderRadius: 3, padding: "1px 4px" }}>Ctrl</kbd>
+              <kbd style={{ border: "1px solid var(--border-strong)", borderRadius: 3, padding: "1px 4px" }}>Shift</kbd>
+              <kbd style={{ border: "1px solid var(--border-strong)", borderRadius: 3, padding: "1px 4px" }}>B</kbd>
+            </span>
+          </div>
+          <div className="settingsSection">About</div>
+          <div className="settingsRow">
+            <div>
+              <div className="settingsLabel">wmux</div>
+              <div className="settingsDesc">Agent workspace for Windows — inspired by cmux</div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

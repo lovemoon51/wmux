@@ -14,3 +14,4 @@ output
 .playwright-cli
 tsconfig.tsbuildinfo
 *Language*
+src/renderer/src/App.tsx.bak
