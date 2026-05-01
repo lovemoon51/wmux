@@ -1,12 +1,29 @@
 import { FitAddon } from "@xterm/addon-fit";
+import { LigaturesAddon } from "@xterm/addon-ligatures";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { Activity, Code2, Minus, Plus } from "lucide-react";
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import type { ShellProfile, Surface, WorkspaceStatus } from "@shared/types";
 import "@xterm/xterm/css/xterm.css";
 
+// 终端字体栈：优先 Nerd Font 与等宽字体，最终退回 monospace
+const terminalFontStack =
+  '"JetBrainsMono Nerd Font", "JetBrains Mono", "Cascadia Code", "Fira Code", "SFMono-Regular", Consolas, monospace';
+
+// URL 识别正则：兼容 smoke dispatchEvent 模拟点击的 DOM 路径
 const terminalUrlPattern = /https?:\/\/[^\s"'<>]+/gi;
 const terminalUrlTrailingPunctuationPattern = /[),.;\]}]+$/;
+
+function extractTerminalUrls(text: string): Array<{ url: string; index: number }> {
+  return Array.from(text.matchAll(terminalUrlPattern))
+    .map((match) => ({
+      url: match[0].replace(terminalUrlTrailingPunctuationPattern, ""),
+      index: match.index ?? 0
+    }))
+    .filter((match) => match.url.length > "https://".length);
+}
 
 const statusLabels: Record<WorkspaceStatus, string> = {
   idle: "Idle",
@@ -21,15 +38,6 @@ const pendingTerminalDisposeTimers = new Map<string, number>();
 const minTerminalFontSize = 10;
 const maxTerminalFontSize = 20;
 const defaultTerminalFontSize = 13;
-
-function extractTerminalUrls(text: string): Array<{ url: string; index: number }> {
-  return Array.from(text.matchAll(terminalUrlPattern))
-    .map((match) => ({
-      url: match[0].replace(terminalUrlTrailingPunctuationPattern, ""),
-      index: match.index ?? 0
-    }))
-    .filter((match) => match.url.length > "https://".length);
-}
 
 export function TerminalSurface({
   surface,
@@ -74,10 +82,11 @@ export function TerminalSurface({
     }
 
     const terminal = new XTerm({
-      allowProposedApi: false,
+      // unicode11 addon 需要 proposed API 才能切换 activeVersion
+      allowProposedApi: true,
       cursorBlink: true,
       convertEol: true,
-      fontFamily: '"JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace',
+      fontFamily: terminalFontStack,
       fontSize,
       lineHeight: 1.32,
       theme: {
@@ -108,8 +117,47 @@ export function TerminalSurface({
     const fitAddon = new FitAddon();
 
     terminal.loadAddon(fitAddon);
+
+    // Unicode11：解决中文 / emoji 宽字符显示
+    const unicode11Addon = new Unicode11Addon();
+    terminal.loadAddon(unicode11Addon);
+    terminal.unicode.activeVersion = "11";
+
     terminal.open(host);
     terminal.focus();
+
+    // Smoke 模式禁用 WebGL/Ligatures：自动化用 textContent 断言，Canvas 渲染不入 DOM
+    const smokeMode = window.wmux?.isSmokeMode?.() ?? false;
+
+    // WebGL：GPU 加速渲染；在 open 之后加载，contextLoss 时退回 canvas
+    let webglAddon: WebglAddon | null = null;
+    if (!smokeMode) {
+      try {
+        webglAddon = new WebglAddon();
+        webglAddon.onContextLoss(() => {
+          // GPU 上下文丢失：dispose addon，xterm 自动退回 DOM/canvas 渲染器
+          webglAddon?.dispose();
+          webglAddon = null;
+        });
+        terminal.loadAddon(webglAddon);
+      } catch (error) {
+        // WebGL2 不可用：保持默认 DOM 渲染器
+        console.warn("[wmux] WebGL renderer unavailable, falling back", error);
+        webglAddon = null;
+      }
+    }
+
+    // Ligatures：必须在 webgl 之后加载（仅在 webgl 渲染下生效）
+    let ligaturesAddon: LigaturesAddon | null = null;
+    if (webglAddon) {
+      try {
+        ligaturesAddon = new LigaturesAddon();
+        terminal.loadAddon(ligaturesAddon);
+      } catch (error) {
+        console.warn("[wmux] Ligatures addon failed to load", error);
+        ligaturesAddon = null;
+      }
+    }
 
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
@@ -184,12 +232,12 @@ export function TerminalSurface({
     };
     host.addEventListener("contextmenu", handleTerminalContextMenu, { capture: true });
 
+    // 终端 URL 点击路由：document 级 capture 监听器，兼容 smoke dispatchEvent 模拟
     const handleTerminalClick = (event: MouseEvent): void => {
       const openUrl = onOpenUrlRef.current;
       if (!openUrl) {
         return;
       }
-
       const hostRect = host.getBoundingClientRect();
       if (
         event.clientX < hostRect.left ||
@@ -199,7 +247,6 @@ export function TerminalSurface({
       ) {
         return;
       }
-
       const rowElement = Array.from(host.querySelectorAll<HTMLElement>(".xterm-rows > div")).find((row) => {
         const rect = row.getBoundingClientRect();
         return event.clientY >= rect.top && event.clientY <= rect.bottom;
@@ -209,19 +256,16 @@ export function TerminalSurface({
       if (!rowElement || rowUrls.length === 0) {
         return;
       }
-
       if (rowUrls.length === 1) {
         openUrl(rowUrls[0].url);
         return;
       }
-
       const rowRect = rowElement.getBoundingClientRect();
       const characterWidth = rowRect.width / Math.max(1, terminal.cols);
       const clickedColumn = Math.floor((event.clientX - rowRect.left) / Math.max(1, characterWidth));
       const clickedUrl = rowUrls.find(
         (candidate) => clickedColumn >= candidate.index && clickedColumn <= candidate.index + candidate.url.length
       );
-
       if (clickedUrl) {
         openUrl(clickedUrl.url);
       }
@@ -235,31 +279,28 @@ export function TerminalSurface({
       window.wmux?.terminal.input({ id: sessionId, data });
     });
 
+    // xterm 内置 link provider：为 hover/underline 装饰提供 buffer 路径识别
     const linkProviderDisposable = terminal.registerLinkProvider({
       provideLinks(bufferLineNumber, callback) {
-        const line = terminal.buffer.active.getLine(bufferLineNumber) ?? terminal.buffer.active.getLine(bufferLineNumber - 1);
+        const line =
+          terminal.buffer.active.getLine(bufferLineNumber) ??
+          terminal.buffer.active.getLine(bufferLineNumber - 1);
         const text = line?.translateToString(true) ?? "";
-        const links = extractTerminalUrls(text)
-          .map((match) => {
-            const startColumn = match.index + 1;
-            const endColumn = startColumn + match.url.length;
-
-            return {
-              range: {
-                start: { x: startColumn, y: bufferLineNumber },
-                end: { x: endColumn, y: bufferLineNumber }
-              },
-              text: match.url,
-              decorations: {
-                pointerCursor: true,
-                underline: true
-              },
-              activate: (_event: MouseEvent, textToOpen: string): void => {
-                onOpenUrlRef.current?.(textToOpen);
-              }
-            };
-          })
-
+        const links = extractTerminalUrls(text).map((match) => {
+          const startColumn = match.index + 1;
+          const endColumn = startColumn + match.url.length;
+          return {
+            range: {
+              start: { x: startColumn, y: bufferLineNumber },
+              end: { x: endColumn, y: bufferLineNumber }
+            },
+            text: match.url,
+            decorations: { pointerCursor: true, underline: true },
+            activate: (_event: MouseEvent, textToOpen: string): void => {
+              onOpenUrlRef.current?.(textToOpen);
+            }
+          };
+        });
         callback(links.length > 0 ? links : undefined);
       }
     });
@@ -298,6 +339,8 @@ export function TerminalSurface({
       inputDisposable.dispose();
       selectionChangeDisposable.dispose();
       linkProviderDisposable.dispose();
+      ligaturesAddon?.dispose();
+      webglAddon?.dispose();
       removeDataListener?.();
       removeExitListener?.();
       const disposeTimer = window.setTimeout(() => {

@@ -185,6 +185,7 @@ async function launchApp() {
     args: ["out/main/index.js"],
     env: {
       ...process.env,
+      WMUX_SMOKE: "1",
       WMUX_USER_DATA_DIR: smokeUserDataPath,
       WMUX_GLOBAL_CONFIG_PATH: globalConfigPath,
       WMUX_SOCKET_PATH: smokeSocketPath,

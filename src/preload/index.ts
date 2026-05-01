@@ -16,6 +16,8 @@ const api = {
   getSecurityState: (): Promise<SocketSecuritySettings> => ipcRenderer.invoke("app:securityState"),
   setSecurityMode: (mode: SocketSecurityMode): Promise<SocketSecuritySettings> =>
     ipcRenderer.invoke("app:setSecurityMode", mode),
+  // Smoke 模式标志：自动化测试用 textContent 断言，需禁用 WebGL/Canvas 渲染
+  isSmokeMode: (): boolean => process.env.WMUX_SMOKE === "1",
   config: {
     loadProjectConfig: (): Promise<WmuxProjectConfigResult> => ipcRenderer.invoke("config:loadProjectConfig")
   },

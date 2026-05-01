@@ -32,6 +32,7 @@ async function launchApp({ socketPath = smokeSocketPath, securityMode = "wmuxOnl
     args: ["out/main/index.js"],
     env: {
       ...process.env,
+      WMUX_SMOKE: "1",
       WMUX_USER_DATA_DIR: smokeUserDataPath,
       WMUX_SOCKET_PATH: socketPath,
       ...(token ? { WMUX_SOCKET_TOKEN: token } : {}),
