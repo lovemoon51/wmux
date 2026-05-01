@@ -96,7 +96,22 @@ const smokeHtml = encodeURIComponent(`<!doctype html>
 const smokeUrl = `data:text/html,${smokeHtml}`;
 
 async function startTerminalLinkServer() {
-  const server = createServer((_request, response) => {
+  const server = createServer((request, response) => {
+    if (request.url?.startsWith("/browser-storage")) {
+      response.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "set-cookie": "wmux_cookie=browser_cookie; Path=/; SameSite=Lax"
+      });
+      response.end(`<!doctype html>
+<title>WMUX Browser Storage Smoke</title>
+<script>
+  localStorage.setItem("wmux_local", "initial-local");
+  sessionStorage.setItem("wmux_session", "initial-session");
+</script>
+<h1>WMUX_BROWSER_STORAGE</h1>`);
+      return;
+    }
+
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     response.end("<!doctype html><title>WMUX Terminal Link</title><h1>WMUX_TERMINAL_LINK_BROWSER</h1>");
   });
@@ -113,7 +128,8 @@ async function startTerminalLinkServer() {
 
   return {
     server,
-    url: `http://127.0.0.1:${address.port}/terminal-link`
+    url: `http://127.0.0.1:${address.port}/terminal-link`,
+    storageUrl: `http://127.0.0.1:${address.port}/browser-storage`
   };
 }
 
@@ -373,6 +389,56 @@ try {
     throw new Error(`screenshot base64 invalid: ${JSON.stringify(screenshotBase64)}`);
   }
   log("ok browser screenshot base64");
+
+  const storageNavigate = parseJson(
+    (await runCli(["browser", "navigate", terminalLink.storageUrl, "--surface", navigate.surfaceId, "--wait", "domcontentloaded", "--json"])).stdout
+  );
+  if (storageNavigate.surfaceId !== navigate.surfaceId || !storageNavigate.url.startsWith(terminalLink.storageUrl)) {
+    throw new Error(`storage page navigate failed: ${JSON.stringify(storageNavigate)}`);
+  }
+  const cookies = parseJson((await runCli(["browser", "cookies", "list", "--surface", navigate.surfaceId, "--json"])).stdout);
+  if (!cookies.cookies?.some((cookie) => cookie.name === "wmux_cookie" && cookie.value === "browser_cookie")) {
+    throw new Error(`browser cookies list did not include expected cookie: ${JSON.stringify(cookies)}`);
+  }
+  const localStorageList = parseJson(
+    (await runCli(["browser", "storage", "list", "--surface", navigate.surfaceId, "--json"])).stdout
+  );
+  if (!localStorageList.entries?.some((entry) => entry.key === "wmux_local" && entry.value === "initial-local")) {
+    throw new Error(`browser storage list did not include localStorage entry: ${JSON.stringify(localStorageList)}`);
+  }
+  const localStorageGet = parseJson(
+    (await runCli(["browser", "storage", "get", "--key", "wmux_local", "--surface", navigate.surfaceId, "--json"])).stdout
+  );
+  if (!localStorageGet.exists || localStorageGet.value !== "initial-local") {
+    throw new Error(`browser storage get returned unexpected value: ${JSON.stringify(localStorageGet)}`);
+  }
+  await runCli([
+    "browser",
+    "storage",
+    "set",
+    "--key",
+    "wmux_local",
+    "--value",
+    "updated-local",
+    "--surface",
+    navigate.surfaceId
+  ]);
+  const updatedLocalStorage = parseJson(
+    (await runCli(["browser", "storage", "get", "--key", "wmux_local", "--surface", navigate.surfaceId, "--json"])).stdout
+  );
+  if (!updatedLocalStorage.exists || updatedLocalStorage.value !== "updated-local") {
+    throw new Error(`browser storage set did not update localStorage: ${JSON.stringify(updatedLocalStorage)}`);
+  }
+  const sessionStorageList = parseJson(
+    (await runCli(["browser", "storage", "list", "--area", "session", "--surface", navigate.surfaceId, "--json"])).stdout
+  );
+  if (
+    sessionStorageList.area !== "session" ||
+    !sessionStorageList.entries?.some((entry) => entry.key === "wmux_session" && entry.value === "initial-session")
+  ) {
+    throw new Error(`browser storage list did not include sessionStorage entry: ${JSON.stringify(sessionStorageList)}`);
+  }
+  log("ok browser cookies/storage");
 
   const second = parseJson(
     (await runCli(["browser", "open", "data:text/html,<title>Second</title><h1>SECOND_BROWSER</h1>", "--json"])).stdout

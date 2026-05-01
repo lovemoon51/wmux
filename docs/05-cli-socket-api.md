@@ -113,6 +113,10 @@ wmux browser fill "#email" --text "dev@example.com" --surface surface:3
 wmux browser eval "document.title" --surface surface:3
 wmux browser console list --surface surface:3
 wmux browser errors list --surface surface:3
+wmux browser cookies list --surface surface:3
+wmux browser storage list --surface surface:3
+wmux browser storage get --key wmux_local --surface surface:3
+wmux browser storage set --key wmux_local --value updated --surface surface:3
 ```
 
 ## 6. Socket 方法
@@ -147,6 +151,10 @@ wmux browser errors list --surface surface:3
 | `browser.eval` | `{ surfaceId, script }` | value |
 | `browser.console.list` | `{ surfaceId?, paneId?, workspaceId?, active?, limit? }` | console entries |
 | `browser.errors.list` | `{ surfaceId?, paneId?, workspaceId?, active?, limit? }` | error entries |
+| `browser.cookies.list` | `{ surfaceId?, paneId?, workspaceId?, active? }` | script-visible cookie entries |
+| `browser.storage.list` | `{ surfaceId?, paneId?, workspaceId?, active?, area? }` | storage entries |
+| `browser.storage.get` | `{ surfaceId?, paneId?, workspaceId?, active?, area?, key }` | storage value |
+| `browser.storage.set` | `{ surfaceId?, paneId?, workspaceId?, active?, area?, key, value }` | ok |
 
 ## 7. 错误码
 

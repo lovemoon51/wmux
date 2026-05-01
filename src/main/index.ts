@@ -532,6 +532,10 @@ function isBrowserRpcMethod(method: string): method is BrowserRpcMethod {
     method === "browser.list" ||
     method === "browser.console.list" ||
     method === "browser.errors.list" ||
+    method === "browser.cookies.list" ||
+    method === "browser.storage.list" ||
+    method === "browser.storage.get" ||
+    method === "browser.storage.set" ||
     method === "browser.screenshot"
   );
 }

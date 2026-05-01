@@ -270,6 +270,10 @@ export type BrowserRpcMethod =
   | "browser.list"
   | "browser.console.list"
   | "browser.errors.list"
+  | "browser.cookies.list"
+  | "browser.storage.list"
+  | "browser.storage.get"
+  | "browser.storage.set"
   | "browser.screenshot";
 
 export type BrowserWaitUntil = "none" | "domcontentloaded" | "load";
@@ -304,6 +308,19 @@ export type BrowserConsoleEntry = {
   source?: string;
   line?: number;
   url?: string;
+};
+
+export type BrowserCookieEntry = {
+  name: string;
+  value: string;
+  url: string;
+};
+
+export type BrowserStorageArea = "local" | "session";
+
+export type BrowserStorageEntry = {
+  key: string;
+  value: string;
 };
 
 export type BrowserNavigateParams = BrowserSurfaceSelector & {
@@ -365,6 +382,28 @@ export type BrowserConsoleListParams = BrowserSurfaceSelector & {
   limit?: number;
 };
 
+export type BrowserCookiesListParams = BrowserSurfaceSelector & {
+  timeoutMs?: number;
+};
+
+export type BrowserStorageListParams = BrowserSurfaceSelector & {
+  area?: BrowserStorageArea;
+  timeoutMs?: number;
+};
+
+export type BrowserStorageGetParams = BrowserSurfaceSelector & {
+  area?: BrowserStorageArea;
+  key: string;
+  timeoutMs?: number;
+};
+
+export type BrowserStorageSetParams = BrowserSurfaceSelector & {
+  area?: BrowserStorageArea;
+  key: string;
+  value: string;
+  timeoutMs?: number;
+};
+
 export type BrowserRpcParams =
   | BrowserNavigateParams
   | BrowserClickParams
@@ -373,7 +412,11 @@ export type BrowserRpcParams =
   | BrowserSnapshotParams
   | BrowserScreenshotParams
   | BrowserListParams
-  | BrowserConsoleListParams;
+  | BrowserConsoleListParams
+  | BrowserCookiesListParams
+  | BrowserStorageListParams
+  | BrowserStorageGetParams
+  | BrowserStorageSetParams;
 
 export type ShellProfileOption = {
   id: ShellProfile;

@@ -120,7 +120,7 @@
 - snapshot/screenshot/get。
 - eval。
 - console/errors。
-- cookies/storage 基础能力。
+- cookies/storage 基础能力（脚本可见 cookie、localStorage/sessionStorage list/get/set）。
 
 交付物：
 

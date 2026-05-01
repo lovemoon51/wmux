@@ -556,6 +556,110 @@ wmux browser screenshot --selector "#app" --out app.png
 wmux browser screenshot --base64
 ```
 
+### 7.8 `browser.cookies.list`
+
+Params:
+
+```ts
+{
+  surfaceId?: string;
+  paneId?: string;
+  workspaceId?: string;
+  active?: boolean;
+  timeoutMs?: number;
+}
+```
+
+Result:
+
+```ts
+{
+  surfaceId: string;
+  url: string;
+  cookies: Array<{
+    name: string;
+    value: string;
+    url: string;
+  }>;
+}
+```
+
+Rules:
+
+- P0 只读取页面脚本可见的 `document.cookie`。
+- HttpOnly cookie、跨站 cookie jar 枚举、cookie set/delete 不属于本命令范围。
+- cookie 名和值尽量按 URI component 解码；解码失败时保留原始文本。
+
+CLI:
+
+```bash
+wmux browser cookies list --surface <surfaceId>
+wmux browser cookies list --surface <surfaceId> --json
+```
+
+### 7.9 `browser.storage.list|get|set`
+
+Params:
+
+```ts
+{
+  surfaceId?: string;
+  paneId?: string;
+  workspaceId?: string;
+  active?: boolean;
+  area?: "local" | "session";
+  key?: string;
+  value?: string;
+  timeoutMs?: number;
+}
+```
+
+Result:
+
+```ts
+// browser.storage.list
+{
+  surfaceId: string;
+  url: string;
+  area: "local" | "session";
+  entries: Array<{ key: string; value: string }>;
+}
+
+// browser.storage.get
+{
+  surfaceId: string;
+  url: string;
+  area: "local" | "session";
+  key: string;
+  value: string | null;
+  exists: boolean;
+}
+
+// browser.storage.set
+{
+  surfaceId: string;
+  url: string;
+  area: "local" | "session";
+  key: string;
+  valueLength: number;
+}
+```
+
+Rules:
+
+- `area` 默认 `local`，可传 `session`。
+- `get` 和 `set` 必须传 `key`；`set` 必须传 `value`。
+- P0 不做 storage clear/remove、indexedDB、Cache API 或跨 origin 枚举。
+
+CLI:
+
+```bash
+wmux browser storage list --surface <surfaceId>
+wmux browser storage list --area session --surface <surfaceId>
+wmux browser storage get --key wmux_local --surface <surfaceId>
+wmux browser storage set --key wmux_local --value updated --surface <surfaceId>
+```
+
 ## 8. CLI 参数规范
 
 通用参数：
@@ -576,7 +680,7 @@ wmux browser screenshot --base64
 - `--active` 与显式 id 同传时返回 CLI 使用错误。
 - `--create` 只允许 `browser navigate`，映射到 `createIfMissing: true`。
 - `wmux browser open <url>` 是 CLI alias，等价于 `wmux browser navigate <url> --create`，不新增 socket method。
-- `browser click/fill/eval/snapshot/screenshot --create` 必须返回 CLI 使用错误，exit code `2`。
+- `browser click/fill/eval/snapshot/screenshot/console/errors/cookies/storage --create` 必须返回 CLI 使用错误，exit code `2`。
 - `--timeout` 单位毫秒。
 - `--json` 输出完整 JSON 响应；否则输出人类可读结果。
 
@@ -648,8 +752,10 @@ INTERNAL
 13. CLI 调 `wmux browser screenshot --base64 --json`，断言 `mimeType` 和 `base64` 存在。
 14. 创建第二个 browser surface 后调用 `wmux browser snapshot`，断言返回 `AMBIGUOUS_TARGET` 且 CLI 输出候选 `--surface <id>`；再用 `--surface` 精确指定并成功。
 15. CLI 调 `wmux browser console list --surface <id> --json` 和 `wmux browser errors list --surface <id> --json`，断言可读取页面 console log/error，且 errors 只返回 error 级别。
-16. 调用 `wmux browser click "#submit" --create`，断言 CLI exit code 为 `2`。
-17. 关闭 Electron，清理临时 userData。
+16. CLI 导航到同源 HTTP storage 测试页，调用 `wmux browser cookies list --surface <id> --json`，断言可读取脚本可见 cookie。
+17. CLI 调 `wmux browser storage list/get/set --surface <id> --json`，断言 localStorage 和 sessionStorage 可读写。
+18. 调用 `wmux browser click "#submit" --create`，断言 CLI exit code 为 `2`。
+19. 关闭 Electron，清理临时 userData。
 
 测试页面：
 
@@ -681,6 +787,7 @@ ok browser console/errors list
 ok browser eval
 ok browser screenshot file
 ok browser screenshot base64
+ok browser cookies/storage
 ok browser ambiguous target
 ok browser create rejected for non-navigate
 browser automation smoke ok
@@ -691,7 +798,7 @@ browser automation smoke ok
 - 安全模式、token、allowAll UI 警告。
 - iframe selector。
 - Playwright role/text selector 语法。
-- cookies/storage API。
+- HttpOnly cookie、cookie set/delete、IndexedDB、Cache API 和跨 origin storage 枚举。
 - full page screenshot 的完美实现。
 - 跨 workspace 批量浏览器自动化。
 

@@ -33,6 +33,11 @@ import {
 import type {
   BrowserClickParams,
   BrowserConsoleEntry,
+  BrowserStorageArea,
+  BrowserStorageEntry,
+  BrowserStorageGetParams,
+  BrowserStorageListParams,
+  BrowserStorageSetParams,
   BrowserEvalParams,
   BrowserFillParams,
   BrowserNavigateParams,
@@ -910,6 +915,10 @@ const socketCapabilities: SocketRpcMethod[] = [
   "browser.list",
   "browser.console.list",
   "browser.errors.list",
+  "browser.cookies.list",
+  "browser.storage.list",
+  "browser.storage.get",
+  "browser.storage.set",
   "browser.screenshot"
 ];
 
@@ -923,6 +932,10 @@ function isBrowserRpcMethod(method: string): method is BrowserRpcMethod {
     method === "browser.list" ||
     method === "browser.console.list" ||
     method === "browser.errors.list" ||
+    method === "browser.cookies.list" ||
+    method === "browser.storage.list" ||
+    method === "browser.storage.get" ||
+    method === "browser.storage.set" ||
     method === "browser.screenshot"
   );
 }
@@ -1472,6 +1485,79 @@ function getValueType(value: unknown): "null" | "boolean" | "number" | "string" 
   return "object";
 }
 
+function readBrowserStorageArea(params: unknown): BrowserStorageArea {
+  const rawArea = isRecord(params) && typeof params.area === "string" ? params.area : "local";
+  if (rawArea === "local" || rawArea === "session") {
+    return rawArea;
+  }
+  throw createBrowserError("BAD_REQUEST", "browser storage area 必须是 local 或 session");
+}
+
+function getBrowserCookiesListScript(): string {
+  return `(() => {
+    const cookies = document.cookie
+      ? document.cookie.split(";").map((item) => item.trim()).filter(Boolean)
+      : [];
+    return {
+      url: location.href,
+      cookies: cookies.map((item) => {
+        const separator = item.indexOf("=");
+        const rawName = separator >= 0 ? item.slice(0, separator) : item;
+        const rawValue = separator >= 0 ? item.slice(separator + 1) : "";
+        const decode = (value) => {
+          try {
+            return decodeURIComponent(value);
+          } catch {
+            return value;
+          }
+        };
+        return {
+          name: decode(rawName),
+          value: decode(rawValue),
+          url: location.href
+        };
+      })
+    };
+  })()`;
+}
+
+function getBrowserStorageListScript(area: BrowserStorageArea): string {
+  return `(() => {
+    const area = ${serializeForInjectedScript(area)};
+    const storage = area === "session" ? window.sessionStorage : window.localStorage;
+    const entries = [];
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index);
+      if (key !== null) {
+        entries.push({ key, value: storage.getItem(key) ?? "" });
+      }
+    }
+    entries.sort((left, right) => left.key.localeCompare(right.key));
+    return { url: location.href, area, entries };
+  })()`;
+}
+
+function getBrowserStorageGetScript(area: BrowserStorageArea, key: string): string {
+  return `(() => {
+    const area = ${serializeForInjectedScript(area)};
+    const key = ${serializeForInjectedScript(key)};
+    const storage = area === "session" ? window.sessionStorage : window.localStorage;
+    const value = storage.getItem(key);
+    return { url: location.href, area, key, value, exists: value !== null };
+  })()`;
+}
+
+function getBrowserStorageSetScript(area: BrowserStorageArea, key: string, value: string): string {
+  return `(() => {
+    const area = ${serializeForInjectedScript(area)};
+    const key = ${serializeForInjectedScript(key)};
+    const value = ${serializeForInjectedScript(value)};
+    const storage = area === "session" ? window.sessionStorage : window.localStorage;
+    storage.setItem(key, value);
+    return { url: location.href, area, key, valueLength: value.length };
+  })()`;
+}
+
 async function runBrowserRpc(
   method: BrowserRpcMethod,
   params: unknown,
@@ -1518,6 +1604,60 @@ async function runBrowserRpc(
       ...commonResult,
       entries: entries.slice(-limit)
     };
+  }
+
+  if (method === "browser.cookies.list") {
+    const timeoutMs = getBrowserTimeout(params, 5000);
+    const result = await executeBrowserJavaScript<{ url: string; cookies: Array<{ name: string; value: string; url: string }> }>(
+      runtime,
+      getBrowserCookiesListScript(),
+      timeoutMs
+    );
+    return { ...commonResult, url: result.url, cookies: result.cookies };
+  }
+
+  if (method === "browser.storage.list") {
+    const storageParams = (isRecord(params) ? params : {}) as BrowserStorageListParams;
+    const area = readBrowserStorageArea(storageParams);
+    const timeoutMs = getBrowserTimeout(params, 5000);
+    const result = await executeBrowserJavaScript<{ url: string; area: BrowserStorageArea; entries: BrowserStorageEntry[] }>(
+      runtime,
+      getBrowserStorageListScript(area),
+      timeoutMs
+    );
+    return { ...commonResult, url: result.url, area: result.area, entries: result.entries };
+  }
+
+  if (method === "browser.storage.get") {
+    const storageParams = (isRecord(params) ? params : {}) as Partial<BrowserStorageGetParams>;
+    if (typeof storageParams.key !== "string" || !storageParams.key) {
+      throw createBrowserError("BAD_REQUEST", "browser storage get 需要 key");
+    }
+    const area = readBrowserStorageArea(storageParams);
+    const timeoutMs = getBrowserTimeout(params, 5000);
+    const result = await executeBrowserJavaScript<{
+      url: string;
+      area: BrowserStorageArea;
+      key: string;
+      value: string | null;
+      exists: boolean;
+    }>(runtime, getBrowserStorageGetScript(area, storageParams.key), timeoutMs);
+    return { ...commonResult, url: result.url, area: result.area, key: result.key, value: result.value, exists: result.exists };
+  }
+
+  if (method === "browser.storage.set") {
+    const storageParams = (isRecord(params) ? params : {}) as Partial<BrowserStorageSetParams>;
+    if (typeof storageParams.key !== "string" || !storageParams.key || typeof storageParams.value !== "string") {
+      throw createBrowserError("BAD_REQUEST", "browser storage set 需要 key 和 value");
+    }
+    const area = readBrowserStorageArea(storageParams);
+    const timeoutMs = getBrowserTimeout(params, 5000);
+    const result = await executeBrowserJavaScript<{ url: string; area: BrowserStorageArea; key: string; valueLength: number }>(
+      runtime,
+      getBrowserStorageSetScript(area, storageParams.key, storageParams.value),
+      timeoutMs
+    );
+    return { ...commonResult, url: result.url, area: result.area, key: result.key, valueLength: result.valueLength };
   }
 
   if (method === "browser.navigate") {

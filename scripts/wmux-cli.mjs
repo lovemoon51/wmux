@@ -58,6 +58,10 @@ function printUsage() {
   wmux browser eval-file <path> [--json]
   wmux browser console list [--surface <id>] [--limit <count>] [--json]
   wmux browser errors list [--surface <id>] [--limit <count>] [--json]
+  wmux browser cookies list [--surface <id>] [--json]
+  wmux browser storage list [--surface <id>] [--area local|session] [--json]
+  wmux browser storage get --key <key> [--surface <id>] [--area local|session] [--json]
+  wmux browser storage set --key <key> --value <value> [--surface <id>] [--area local|session] [--json]
   wmux browser snapshot [--selector <selector>] [--json] [--out <path>]
   wmux browser screenshot [--out <path>] [--format png|jpeg] [--base64] [--json]`);
 }
@@ -102,10 +106,12 @@ function hasFlag(name) {
 }
 
 const optionFlagsWithValues = new Set([
+  "--area",
   "--body",
   "--cwd",
   "--direction",
   "--format",
+  "--key",
   "--load-wait",
   "--limit",
   "--name",
@@ -120,6 +126,7 @@ const optionFlagsWithValues = new Set([
   "--timeout",
   "--title",
   "--url",
+  "--value",
   "--wait",
   "--workspace"
 ]);
@@ -163,6 +170,17 @@ function readLimit() {
     throw cliError("--limit 必须是正整数");
   }
   return Math.floor(limit);
+}
+
+function readBrowserStorageArea() {
+  const area = parseOption("--area");
+  if (area === undefined) {
+    return undefined;
+  }
+  if (area !== "local" && area !== "session") {
+    throw cliError("--area 必须是 local 或 session");
+  }
+  return area;
 }
 
 function readSelectorParams(allowCreate) {
@@ -250,6 +268,74 @@ function createBrowserRequest() {
         ...(limit ? { limit } : {})
       }
     };
+  }
+
+  if (browserCommand === "cookies") {
+    const listCommand = args[2];
+    if (listCommand !== "list") {
+      throw cliError("browser cookies 需要 list 子命令");
+    }
+    return {
+      method: "browser.cookies.list",
+      params: {
+        ...readSelectorParams(false),
+        ...(readTimeout() ? { timeoutMs: readTimeout() } : {})
+      }
+    };
+  }
+
+  if (browserCommand === "storage") {
+    const storageCommand = args[2];
+    const area = readBrowserStorageArea();
+    if (storageCommand === "list") {
+      return {
+        method: "browser.storage.list",
+        params: {
+          ...readSelectorParams(false),
+          ...(area ? { area } : {}),
+          ...(readTimeout() ? { timeoutMs: readTimeout() } : {})
+        }
+      };
+    }
+
+    if (storageCommand === "get") {
+      const key = parseOption("--key");
+      if (!key || key.startsWith("--")) {
+        throw cliError("browser storage get 需要 --key <key>");
+      }
+      return {
+        method: "browser.storage.get",
+        params: {
+          ...readSelectorParams(false),
+          key,
+          ...(area ? { area } : {}),
+          ...(readTimeout() ? { timeoutMs: readTimeout() } : {})
+        }
+      };
+    }
+
+    if (storageCommand === "set") {
+      const key = parseOption("--key");
+      const value = parseOption("--value");
+      if (!key || key.startsWith("--")) {
+        throw cliError("browser storage set 需要 --key <key>");
+      }
+      if (value === undefined || value.startsWith("--")) {
+        throw cliError("browser storage set 需要 --value <value>");
+      }
+      return {
+        method: "browser.storage.set",
+        params: {
+          ...readSelectorParams(false),
+          key,
+          value,
+          ...(area ? { area } : {}),
+          ...(readTimeout() ? { timeoutMs: readTimeout() } : {})
+        }
+      };
+    }
+
+    throw cliError(`未知 browser storage 命令：${storageCommand ?? ""}`);
   }
 
   if (browserCommand === "fill") {
@@ -706,6 +792,28 @@ function printBrowserResult(result) {
       console.log(`${entry.at}\t${entry.level}\t${entry.message}${location}`);
     }
     return;
+  }
+  if (browserCommand === "cookies") {
+    for (const cookie of result?.cookies ?? []) {
+      console.log(`${cookie.name}\t${cookie.value}`);
+    }
+    return;
+  }
+  if (browserCommand === "storage") {
+    if (args[2] === "list") {
+      for (const entry of result?.entries ?? []) {
+        console.log(`${result?.area ?? "local"}\t${entry.key}\t${entry.value}`);
+      }
+      return;
+    }
+    if (args[2] === "get") {
+      console.log(result?.exists ? `${result.area}\t${result.key}\t${result.value ?? ""}` : `${result?.area ?? "local"}\t${result?.key ?? ""}\t`);
+      return;
+    }
+    if (args[2] === "set") {
+      console.log(`set ${result?.area ?? "local"}Storage ${result?.key ?? "key"}`);
+      return;
+    }
   }
   if (browserCommand === "eval") {
     console.log(typeof result?.value === "string" ? result.value : JSON.stringify(result?.value));
