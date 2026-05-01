@@ -31,23 +31,30 @@ export function TerminalSurface({
   surface,
   cwd,
   shell,
-  onOpenUrl
+  onOpenUrl,
+  onOutput
 }: {
   surface: Surface;
   cwd: string;
   shell: ShellProfile;
   onOpenUrl?: (url: string) => void;
+  onOutput?: (surfaceId: string, output: string) => void;
 }): ReactElement {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const onOpenUrlRef = useRef(onOpenUrl);
+  const onOutputRef = useRef(onOutput);
   const lastSelectionRef = useRef("");
   const sessionId = `${surface.id}:${shell}`;
 
   useEffect(() => {
     onOpenUrlRef.current = onOpenUrl;
   }, [onOpenUrl]);
+
+  useEffect(() => {
+    onOutputRef.current = onOutput;
+  }, [onOutput]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -228,6 +235,7 @@ export function TerminalSurface({
     const removeDataListener = window.wmux?.terminal.onData(({ id, data }) => {
       if (id === sessionId) {
         terminal.write(data);
+        onOutputRef.current?.(surface.id, data);
       }
     });
 

@@ -146,6 +146,11 @@ type WorkspaceStatusEventInput = {
   message?: string;
 };
 
+type TerminalAttentionPrompt = {
+  marker: string;
+  message: string;
+};
+
 type BrowserSurfaceTarget = {
   workspaceId: string;
   paneId: string;
@@ -402,6 +407,17 @@ const statusLabels: Record<WorkspaceStatus, string> = {
 
 const workspaceStatusValues: WorkspaceStatus[] = ["idle", "running", "attention", "success", "error"];
 const maxWorkspaceStatusEvents = 4;
+const terminalControlSequencePattern = /\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))/g;
+const terminalAttentionPrompts: TerminalAttentionPrompt[] = [
+  {
+    marker: "would you like to run the following command?",
+    message: "Agent is waiting for command approval"
+  },
+  {
+    marker: "press enter to confirm or esc to cancel",
+    message: "Agent is waiting for confirmation"
+  }
+];
 
 function isWorkspaceStatus(value: unknown): value is WorkspaceStatus {
   return typeof value === "string" && workspaceStatusValues.includes(value as WorkspaceStatus);
@@ -431,6 +447,11 @@ function withWorkspaceStatusEvent(workspace: Workspace, input: WorkspaceStatusEv
     ...workspace,
     recentEvents: [event, ...(workspace.recentEvents ?? [])].slice(0, maxWorkspaceStatusEvents)
   };
+}
+
+function detectTerminalAttentionPrompt(output: string): TerminalAttentionPrompt | undefined {
+  const normalizedOutput = output.replace(terminalControlSequencePattern, "").replace(/\r/g, "\n").toLowerCase();
+  return terminalAttentionPrompts.find((prompt) => normalizedOutput.includes(prompt.marker));
 }
 
 const statusClass: Record<WorkspaceStatus, string> = {
@@ -1644,6 +1665,7 @@ export function App(): ReactElement {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [securitySettings, setSecuritySettings] = useState<SocketSecuritySettings | null>(null);
   const [securityModeDraft, setSecurityModeDraft] = useState<SocketSecurityMode>("wmuxOnly");
+  const terminalOutputBuffersRef = useRef(new Map<string, string>());
 
   useEffect(() => {
     void window.wmux?.getVersion().then(setAppVersion).catch(() => setAppVersion("dev"));
@@ -3003,6 +3025,36 @@ export function App(): ReactElement {
     );
   };
 
+  const handleTerminalOutput = (surfaceId: string, output: string): void => {
+    const previousOutput = terminalOutputBuffersRef.current.get(surfaceId) ?? "";
+    const recentOutput = `${previousOutput}${output}`.slice(-1200);
+    terminalOutputBuffersRef.current.set(surfaceId, recentOutput);
+
+    const attentionPrompt = detectTerminalAttentionPrompt(recentOutput);
+    if (!attentionPrompt) {
+      return;
+    }
+    terminalOutputBuffersRef.current.set(surfaceId, "");
+
+    setWorkspaces((currentWorkspaces) =>
+      currentWorkspaces.map((workspace) => {
+        const surface = workspace.surfaces[surfaceId];
+        if (!surface || workspace.notice === attentionPrompt.message) {
+          return workspace;
+        }
+
+        return {
+          ...withWorkspaceStatusEvent(workspace, {
+            status: "attention",
+            message: attentionPrompt.message
+          }),
+          status: "attention",
+          notice: attentionPrompt.message
+        };
+      })
+    );
+  };
+
   const handleCloseSurface = (paneId: string, surfaceId: string): void => {
     updateActiveWorkspace((workspace) => {
       const pane = workspace.panes[paneId];
@@ -3329,6 +3381,7 @@ export function App(): ReactElement {
             onDropSurfaceToPane={handleDropSurfaceToPane}
             onUpdateSurfaceSubtitle={handleUpdateSurfaceSubtitle}
             onOpenTerminalUrl={handleOpenTerminalUrl}
+            onTerminalOutput={handleTerminalOutput}
           />
         </div>
       </section>
@@ -3915,7 +3968,8 @@ function LayoutRenderer({
   onClosePane,
   onDropSurfaceToPane,
   onUpdateSurfaceSubtitle,
-  onOpenTerminalUrl
+  onOpenTerminalUrl,
+  onTerminalOutput
 }: {
   workspace: Workspace;
   node: LayoutNode;
@@ -3929,6 +3983,7 @@ function LayoutRenderer({
   onDropSurfaceToPane: (targetPaneId: string, edge: SplitDropEdge, payload: DraggedSurfacePayload) => void;
   onUpdateSurfaceSubtitle: (surfaceId: string, subtitle: string) => void;
   onOpenTerminalUrl: (url: string) => void;
+  onTerminalOutput: (surfaceId: string, output: string) => void;
 }): ReactElement {
   if (node.type === "pane") {
     return (
@@ -3944,6 +3999,7 @@ function LayoutRenderer({
         onDropSurfaceToPane={onDropSurfaceToPane}
         onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle}
         onOpenTerminalUrl={onOpenTerminalUrl}
+        onTerminalOutput={onTerminalOutput}
       />
     );
   }
@@ -3970,6 +4026,7 @@ function LayoutRenderer({
         onDropSurfaceToPane={onDropSurfaceToPane}
         onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle}
         onOpenTerminalUrl={onOpenTerminalUrl}
+        onTerminalOutput={onTerminalOutput}
       />
       <SplitHandle node={node} onResizeSplit={onResizeSplit} />
       <LayoutRenderer
@@ -3985,6 +4042,7 @@ function LayoutRenderer({
         onDropSurfaceToPane={onDropSurfaceToPane}
         onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle}
         onOpenTerminalUrl={onOpenTerminalUrl}
+        onTerminalOutput={onTerminalOutput}
       />
     </div>
   );
@@ -4047,7 +4105,8 @@ function PaneView({
   onClosePane,
   onDropSurfaceToPane,
   onUpdateSurfaceSubtitle,
-  onOpenTerminalUrl
+  onOpenTerminalUrl,
+  onTerminalOutput
 }: {
   workspace: Workspace;
   paneId: string;
@@ -4060,6 +4119,7 @@ function PaneView({
   onDropSurfaceToPane: (targetPaneId: string, edge: SplitDropEdge, payload: DraggedSurfacePayload) => void;
   onUpdateSurfaceSubtitle: (surfaceId: string, subtitle: string) => void;
   onOpenTerminalUrl: (url: string) => void;
+  onTerminalOutput: (surfaceId: string, output: string) => void;
 }): ReactElement {
   const pane = workspace.panes[paneId];
   const surfaces = pane.surfaceIds.map((id) => workspace.surfaces[id]);
@@ -4128,6 +4188,7 @@ function PaneView({
               shellProfile={shellProfile}
               onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle}
               onOpenTerminalUrl={onOpenTerminalUrl}
+              onTerminalOutput={onTerminalOutput}
             />
           </div>
         ))}
@@ -4213,19 +4274,29 @@ function SurfaceBody({
   cwd,
   shellProfile,
   onUpdateSurfaceSubtitle,
-  onOpenTerminalUrl
+  onOpenTerminalUrl,
+  onTerminalOutput
 }: {
   surface: Surface;
   cwd: string;
   shellProfile: ShellProfile;
   onUpdateSurfaceSubtitle: (surfaceId: string, subtitle: string) => void;
   onOpenTerminalUrl: (url: string) => void;
+  onTerminalOutput: (surfaceId: string, output: string) => void;
 }): ReactElement {
   if (surface.type === "browser") {
     return <BrowserSurface surface={surface} onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle} />;
   }
 
-  return <TerminalSurface surface={surface} cwd={cwd} shell={shellProfile} onOpenUrl={onOpenTerminalUrl} />;
+  return (
+    <TerminalSurface
+      surface={surface}
+      cwd={cwd}
+      shell={shellProfile}
+      onOpenUrl={onOpenTerminalUrl}
+      onOutput={onTerminalOutput}
+    />
+  );
 }
 
 function normalizeBrowserUrl(value: string): string {

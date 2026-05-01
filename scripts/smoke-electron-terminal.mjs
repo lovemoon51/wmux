@@ -410,6 +410,29 @@ async function runTerminalCommand(window, command, expectedText) {
   log(`ok ${command}`);
 }
 
+async function runAgentAttentionSmoke(window) {
+  log("agent attention detection");
+  await window.getByLabel("Open workspace API Server").click();
+  await window.getByRole("heading", { name: "API Server" }).waitFor({ timeout: 15_000 });
+  await window.locator('button.surfaceTab[aria-label="Codex Agent"]').click();
+  await runTerminalCommand(
+    window,
+    'Write-Output "Press enter to confirm or esc to cancel"',
+    "Press enter to confirm or esc to cancel"
+  );
+  const apiWorkspaceItem = window.locator(".workspaceItem").filter({ hasText: "API Server" }).first();
+  await apiWorkspaceItem.getByText("Needs input").waitFor({ timeout: 15_000 });
+  await apiWorkspaceItem.getByText("Agent is waiting for confirmation").waitFor({ timeout: 15_000 });
+  await window.getByRole("button", { name: /Notifications/ }).click();
+  await window.getByLabel("Notifications panel").getByText("Agent is waiting for confirmation").waitFor({
+    timeout: 15_000
+  });
+  await window.getByLabel("Clear notification API Server").click();
+  await apiWorkspaceItem.getByText("Idle").waitFor({ timeout: 15_000 });
+  await window.getByLabel("Notifications panel").waitFor({ state: "detached", timeout: 15_000 }).catch(() => undefined);
+  log("ok agent attention detection");
+}
+
 async function waitForActiveTerminalRowText(window, text) {
   await window.waitForFunction(
     (expectedText) =>
@@ -1680,6 +1703,7 @@ try {
   await runTerminalCommand(window, "ls package.json", "package.json");
   await runTerminalCommand(window, "clear", "Codex Agent");
   await runTerminalCommand(window, "Write-Output WMUX_TERMINAL_SMOKE", "WMUX_TERMINAL_SMOKE");
+  await runAgentAttentionSmoke(window);
   await runTerminalSelectionStabilitySmoke(window);
   await runRightClickClipboardSmoke(app, window);
   await runEightTerminalSurfaceLatencySmoke(window);
