@@ -59,6 +59,7 @@ import type {
   SocketSecurityMode,
   SocketSecuritySettings,
   StatusListParams,
+  StatusSetParams,
   Surface,
   SurfaceCreateBrowserParams,
   SurfaceCreateTerminalParams,
@@ -392,6 +393,12 @@ const statusLabels: Record<WorkspaceStatus, string> = {
   success: "Done",
   error: "Error"
 };
+
+const workspaceStatusValues: WorkspaceStatus[] = ["idle", "running", "attention", "success", "error"];
+
+function isWorkspaceStatus(value: unknown): value is WorkspaceStatus {
+  return typeof value === "string" && workspaceStatusValues.includes(value as WorkspaceStatus);
+}
 
 const statusClass: Record<WorkspaceStatus, string> = {
   idle: "statusIdle",
@@ -820,6 +827,7 @@ const socketCapabilities: SocketRpcMethod[] = [
   "surface.sendText",
   "surface.sendKey",
   "status.notify",
+  "status.set",
   "status.clear",
   "status.list",
   "browser.navigate",
@@ -2586,6 +2594,45 @@ export function App(): ReactElement {
           )
         );
         window.wmux?.socket.respond(createSocketSuccessResponse(request.id, { workspaceId: targetWorkspaceId, notice }));
+        return;
+      }
+
+      if (request.method === "status.set") {
+        const params = (request.params ?? {}) as Partial<StatusSetParams>;
+        if (!isWorkspaceStatus(params.status)) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "BAD_REQUEST", "status 需要 idle|running|attention|success|error")
+          );
+          return;
+        }
+        const nextStatus = params.status;
+
+        const targetWorkspaceId = params.workspaceId ?? currentActiveWorkspaceId;
+        const targetWorkspace = currentWorkspaces.find((workspace) => workspace.id === targetWorkspaceId);
+        if (!targetWorkspace) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "NOT_FOUND", "找不到 workspace", {
+              workspaceId: targetWorkspaceId
+            })
+          );
+          return;
+        }
+
+        const notice = typeof params.notice === "string" && params.notice.trim() ? params.notice : undefined;
+        setWorkspaces((items) =>
+          items.map((workspace) =>
+            workspace.id === targetWorkspaceId
+              ? {
+                  ...workspace,
+                  status: nextStatus,
+                  notice
+                }
+              : workspace
+          )
+        );
+        window.wmux?.socket.respond(
+          createSocketSuccessResponse(request.id, { workspaceId: targetWorkspaceId, status: nextStatus, notice })
+        );
         return;
       }
 

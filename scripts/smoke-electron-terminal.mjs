@@ -700,6 +700,7 @@ async function runCliSocketSmoke(window) {
     "surface.createBrowser",
     "surface.focus",
     "surface.sendKey",
+    "status.set",
     "status.clear",
     "status.list",
     "browser.list"
@@ -1040,6 +1041,34 @@ async function runCliSocketSmoke(window) {
     throw new Error(`wmux status list --json did not include the active notice: ${statusListJsonOutput}`);
   }
   log("ok wmux status list");
+
+  const statusSetOutput = await runCliCommand([
+    "status",
+    "set",
+    "--status",
+    "success",
+    "--notice",
+    "WMUX_STATUS_SET_OK"
+  ]);
+  if (!statusSetOutput.includes("set") || !statusSetOutput.includes("success")) {
+    throw new Error(`wmux status set did not report success: ${statusSetOutput}`);
+  }
+  await apiWorkspaceItem.getByText("Done").waitFor({ timeout: 15_000 });
+  await apiWorkspaceItem.getByText("WMUX_STATUS_SET_OK").waitFor({ timeout: 15_000 });
+  const statusSetListJsonOutput = await runCliCommand(["status", "list", "--json"]);
+  const statusSetList = JSON.parse(statusSetListJsonOutput);
+  if (
+    !statusSetList.statuses?.some(
+      (item) => item.name === "API Server" && item.status === "success" && item.notice === "WMUX_STATUS_SET_OK"
+    )
+  ) {
+    throw new Error(`wmux status list --json did not include status set result: ${statusSetListJsonOutput}`);
+  }
+  const invalidStatusSet = await runCliCommandFailure(["status", "set", "--status", "blocked"]);
+  if (invalidStatusSet.code !== 2 || !invalidStatusSet.output.includes("status set 需要 --status")) {
+    throw new Error(`wmux status set invalid status error was unclear: ${JSON.stringify(invalidStatusSet)}`);
+  }
+  log("ok wmux status set");
 
   const missingWorkspace = await runCliCommandFailure(["status", "list", "--workspace", "workspace:missing"]);
   if (

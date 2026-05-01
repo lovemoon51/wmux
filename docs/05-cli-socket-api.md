@@ -94,6 +94,7 @@ wmux paste
 
 ```bash
 wmux notify --title "Build complete" --body "All checks passed"
+wmux status set --status running --notice "npm test"
 wmux status list
 wmux status list --json
 wmux clear-status
@@ -134,6 +135,7 @@ wmux browser errors list --surface surface:3
 | `surface.sendText` | `{ surfaceId?, text }` | ok |
 | `surface.sendKey` | `{ surfaceId?, key }` | ok |
 | `status.notify` | `{ workspaceId?, title, body? }` | notice |
+| `status.set` | `{ workspaceId?, status, notice? }` | workspace status |
 | `status.clear` | `{ workspaceId? }` | ok |
 | `status.list` | `{ workspaceId? }` | workspace status list |
 | `browser.navigate` | `{ surfaceId, url }` | ok |

@@ -57,6 +57,9 @@ wmux focus-surface --surface <surfaceId>
 wmux send-surface --surface <surfaceId> "npm test\n"
 wmux send-key-surface --surface <surfaceId> enter
 wmux new-split --direction vertical
+wmux status set --status running --notice "npm test"
+wmux status list
+wmux clear-status
 ```
 
 ## Project Config

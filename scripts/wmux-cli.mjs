@@ -46,6 +46,7 @@ function printUsage() {
   wmux send-key-surface --surface <id> <key> [--json]
   wmux notify --title <title> [--body <body>] [--json]
   wmux clear-status [--workspace <id>] [--json]
+  wmux status set --status idle|running|attention|success|error [--notice <text>] [--workspace <id>] [--json]
   wmux status list [--workspace <id>] [--json]
   wmux browser navigate <url> [--surface <id>] [--create] [--wait load|domcontentloaded|none] [--timeout <ms>] [--json]
   wmux browser open <url> [--json]
@@ -104,10 +105,12 @@ const optionFlagsWithValues = new Set([
   "--format",
   "--load-wait",
   "--name",
+  "--notice",
   "--out",
   "--pane",
   "--selector",
   "--surface",
+  "--status",
   "--text",
   "--text-file",
   "--timeout",
@@ -116,6 +119,8 @@ const optionFlagsWithValues = new Set([
   "--wait",
   "--workspace"
 ]);
+
+const workspaceStatuses = new Set(["idle", "running", "attention", "success", "error"]);
 
 function readFirstPositionalAfterCommand() {
   for (let index = 1; index < args.length; index += 1) {
@@ -544,6 +549,31 @@ function createRequest() {
 
   if (command === "status" || command === "list-status") {
     const statusCommand = command === "status" ? args[1] : "list";
+    const workspaceId = parseOption("--workspace");
+
+    if (statusCommand === "set") {
+      const status = parseOption("--status");
+      const notice = parseOption("--notice");
+      if (!workspaceStatuses.has(status)) {
+        throw cliError("status set 需要 --status idle|running|attention|success|error");
+      }
+      if (hasFlag("--workspace") && (!workspaceId || workspaceId.startsWith("--"))) {
+        throw cliError("status set 的 --workspace 需要 workspace id");
+      }
+      if (hasFlag("--notice") && (notice === undefined || notice.startsWith("--"))) {
+        throw cliError("status set 的 --notice 需要文本");
+      }
+
+      return {
+        method: "status.set",
+        params: {
+          status,
+          ...(notice !== undefined ? { notice } : {}),
+          ...(workspaceId ? { workspaceId } : {})
+        }
+      };
+    }
+
     if (statusCommand !== "list") {
       throw cliError(`未知 status 命令：${statusCommand ?? ""}`);
     }
@@ -551,7 +581,7 @@ function createRequest() {
     return {
       method: "status.list",
       params: {
-        ...(parseOption("--workspace") ? { workspaceId: parseOption("--workspace") } : {})
+        ...(workspaceId ? { workspaceId } : {})
       }
     };
   }
@@ -851,6 +881,13 @@ function printResult(result) {
   }
 
   if (command === "status" || command === "list-status") {
+    const statusCommand = command === "status" ? args[1] : "list";
+    if (statusCommand === "set") {
+      const notice = result?.notice ? `\t${result.notice}` : "";
+      console.log(`set ${result?.workspaceId ?? "workspace"} ${result?.status ?? "status"}${notice}`);
+      return;
+    }
+
     for (const item of result?.statuses ?? []) {
       const activePrefix = item.active ? "*" : " ";
       const notice = item.notice ? `\t${item.notice}` : "";
