@@ -48,6 +48,7 @@ function printUsage() {
   wmux clear-status [--workspace <id>] [--json]
   wmux status set --status idle|running|attention|success|error [--notice <text>] [--workspace <id>] [--json]
   wmux status list [--workspace <id>] [--json]
+  wmux status history [--workspace <id>] [--json]
   wmux browser navigate <url> [--surface <id>] [--create] [--wait load|domcontentloaded|none] [--timeout <ms>] [--json]
   wmux browser open <url> [--json]
   wmux browser list [--json]
@@ -574,7 +575,7 @@ function createRequest() {
       };
     }
 
-    if (statusCommand !== "list") {
+    if (statusCommand !== "list" && statusCommand !== "history") {
       throw cliError(`未知 status 命令：${statusCommand ?? ""}`);
     }
 
@@ -885,6 +886,15 @@ function printResult(result) {
     if (statusCommand === "set") {
       const notice = result?.notice ? `\t${result.notice}` : "";
       console.log(`set ${result?.workspaceId ?? "workspace"} ${result?.status ?? "status"}${notice}`);
+      return;
+    }
+
+    if (statusCommand === "history") {
+      for (const item of result?.statuses ?? []) {
+        for (const event of item.recentEvents ?? []) {
+          console.log(`${item.name}\t${event.status}\t${event.message}`);
+        }
+      }
       return;
     }
 

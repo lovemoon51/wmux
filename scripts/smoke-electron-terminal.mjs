@@ -1082,6 +1082,19 @@ async function runCliSocketSmoke(window) {
     .getByLabel("Recent events API Server")
     .getByText("WMUX_CLI_NOTIFY: socket smoke")
     .waitFor({ timeout: 15_000 });
+  const statusHistoryOutput = await runCliCommand(["status", "history"]);
+  if (!statusHistoryOutput.includes("API Server") || !statusHistoryOutput.includes("WMUX_CLI_NOTIFY: socket smoke")) {
+    throw new Error(`wmux status history did not include prior notice: ${statusHistoryOutput}`);
+  }
+  const statusHistoryJsonOutput = await runCliCommand(["status", "history", "--json"]);
+  const statusHistory = JSON.parse(statusHistoryJsonOutput);
+  if (
+    !statusHistory.statuses?.some((item) =>
+      item.recentEvents?.some((event) => event.message === "WMUX_CLI_NOTIFY: socket smoke")
+    )
+  ) {
+    throw new Error(`wmux status history --json did not include recent events: ${statusHistoryJsonOutput}`);
+  }
   const statusSetListJsonOutput = await runCliCommand(["status", "list", "--json"]);
   const statusSetList = JSON.parse(statusSetListJsonOutput);
   if (

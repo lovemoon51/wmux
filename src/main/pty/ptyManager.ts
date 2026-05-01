@@ -12,6 +12,8 @@ type TerminalSession = {
 };
 
 const sessions = new Map<string, TerminalSession>();
+const pendingInputs = new Map<string, string[]>();
+const maxPendingInputItems = 20;
 
 const windowsShellPaths = {
   pwsh: "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
@@ -144,6 +146,11 @@ export function registerPtyIpc(): void {
       };
 
       sessions.set(payload.id, session);
+      const pendingInputItems = pendingInputs.get(payload.id);
+      if (pendingInputItems) {
+        pendingInputs.delete(payload.id);
+        pendingInputItems.forEach((data) => pty.write(data));
+      }
 
       pty.onData((data) => {
         if (!event.sender.isDestroyed()) {
@@ -167,7 +174,15 @@ export function registerPtyIpc(): void {
   );
 
   ipcMain.on("terminal:input", (_event, payload: { id: string; data: string }) => {
-    sessions.get(payload.id)?.pty.write(payload.data);
+    const session = sessions.get(payload.id);
+    if (session) {
+      session.pty.write(payload.data);
+      return;
+    }
+
+    const pendingInputItems = pendingInputs.get(payload.id) ?? [];
+    pendingInputItems.push(payload.data);
+    pendingInputs.set(payload.id, pendingInputItems.slice(-maxPendingInputItems));
   });
 
   ipcMain.on("terminal:resize", (_event, payload: { id: string; cols: number; rows: number }) => {
@@ -185,6 +200,7 @@ export function registerPtyIpc(): void {
 }
 
 function disposeTerminal(id: string): void {
+  pendingInputs.delete(id);
   const session = sessions.get(id);
   if (!session) {
     return;

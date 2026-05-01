@@ -96,6 +96,7 @@ wmux paste
 wmux notify --title "Build complete" --body "All checks passed"
 wmux status set --status running --notice "npm test"
 wmux status list
+wmux status history
 wmux status list --json
 wmux clear-status
 ```
