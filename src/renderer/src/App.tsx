@@ -79,6 +79,7 @@ import type {
   WorkspaceRenameParams,
   WorkspaceSelectParams,
   WorkspaceStatus,
+  WorkspaceStatusEvent,
   WorkspaceSummary
 } from "@shared/types";
 import { TerminalSurface } from "./components/TerminalSurface";
@@ -138,6 +139,11 @@ type PendingProjectCommandConfirmation = {
   command: WmuxCommandConfig;
   reason: "trust" | "restart";
   existingWorkspaceId?: string;
+};
+
+type WorkspaceStatusEventInput = {
+  status: WorkspaceStatus;
+  message?: string;
 };
 
 type BrowserSurfaceTarget = {
@@ -395,9 +401,36 @@ const statusLabels: Record<WorkspaceStatus, string> = {
 };
 
 const workspaceStatusValues: WorkspaceStatus[] = ["idle", "running", "attention", "success", "error"];
+const maxWorkspaceStatusEvents = 4;
 
 function isWorkspaceStatus(value: unknown): value is WorkspaceStatus {
   return typeof value === "string" && workspaceStatusValues.includes(value as WorkspaceStatus);
+}
+
+function createWorkspaceStatusEvent(input: WorkspaceStatusEventInput): WorkspaceStatusEvent | undefined {
+  const message = input.message?.trim();
+  if (!message) {
+    return undefined;
+  }
+
+  return {
+    id: `event-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    at: new Date().toISOString(),
+    status: input.status,
+    message
+  };
+}
+
+function withWorkspaceStatusEvent(workspace: Workspace, input: WorkspaceStatusEventInput): Workspace {
+  const event = createWorkspaceStatusEvent(input);
+  if (!event) {
+    return workspace;
+  }
+
+  return {
+    ...workspace,
+    recentEvents: [event, ...(workspace.recentEvents ?? [])].slice(0, maxWorkspaceStatusEvents)
+  };
 }
 
 const statusClass: Record<WorkspaceStatus, string> = {
@@ -426,6 +459,14 @@ const initialWorkspaces: Workspace[] = [
     ports: [8787],
     status: "running",
     notice: "uvicorn ready on 8787",
+    recentEvents: [
+      {
+        id: "event-api-ready",
+        at: "2026-05-01T00:00:00.000Z",
+        status: "running",
+        message: "uvicorn ready on 8787"
+      }
+    ],
     activePaneId: "pane-terminal",
     layout: {
       type: "split",
@@ -1498,7 +1539,8 @@ function createWorkspaceSummaries(workspaces: Workspace[], activeWorkspaceId: st
       active: workspace.id === activeWorkspaceId,
       activePaneId: workspace.activePaneId,
       activeSurfaceId: activePane?.activeSurfaceId,
-      notice: workspace.notice
+      notice: workspace.notice,
+      recentEvents: workspace.recentEvents
     };
   });
 }
@@ -1622,7 +1664,11 @@ export function App(): ReactElement {
               ? {
                   ...workspace,
                   status: "attention",
-                  notice: state.warning
+                  notice: state.warning,
+                  recentEvents: withWorkspaceStatusEvent(workspace, {
+                    status: "attention",
+                    message: state.warning
+                  }).recentEvents
                 }
               : workspace
           )
@@ -2012,7 +2058,8 @@ export function App(): ReactElement {
           ? {
               ...workspace,
               status: "idle",
-              notice: undefined
+              notice: undefined,
+              recentEvents: undefined
             }
           : workspace
       )
@@ -2586,7 +2633,7 @@ export function App(): ReactElement {
           items.map((workspace) =>
             workspace.id === targetWorkspaceId
               ? {
-                  ...workspace,
+                  ...withWorkspaceStatusEvent(workspace, { status: "attention", message: notice }),
                   status: "attention",
                   notice
                 }
@@ -2623,7 +2670,10 @@ export function App(): ReactElement {
           items.map((workspace) =>
             workspace.id === targetWorkspaceId
               ? {
-                  ...workspace,
+                  ...withWorkspaceStatusEvent(workspace, {
+                    status: nextStatus,
+                    message: notice ?? statusLabels[nextStatus]
+                  }),
                   status: nextStatus,
                   notice
                 }
@@ -2655,7 +2705,8 @@ export function App(): ReactElement {
               ? {
                   ...workspace,
                   status: "idle",
-                  notice: undefined
+                  notice: undefined,
+                  recentEvents: undefined
                 }
               : workspace
           )
@@ -3524,7 +3575,9 @@ function WorkspaceSidebar({
   onSecurityModeDraftChange: (mode: SocketSecurityMode) => void;
   onSaveSecurityMode: () => void;
 }): ReactElement {
-  const notificationItems = workspaces.filter((workspace) => Boolean(workspace.notice));
+  const notificationItems = workspaces.filter((workspace) =>
+    Boolean(workspace.notice || workspace.recentEvents?.length)
+  );
 
   return (
     <aside className="sidebar">
@@ -3689,36 +3742,52 @@ function WorkspaceSidebar({
         {notificationsOpen && (
           <div className="notificationPanel" aria-label="Notifications panel">
             {notificationItems.length ? (
-              notificationItems.map((workspace) => (
-                <div
-                  className="notificationItem"
-                  key={workspace.id}
-                >
-                  <span className={`statusRing ${statusClass[workspace.status]}`} />
-                  <span className="notificationMain">
-                    <span className="notificationTitleRow">
-                      <span className="notificationWorkspace">{workspace.name}</span>
-                      <span className="notificationStatus">{statusLabels[workspace.status]}</span>
+              notificationItems.map((workspace) => {
+                const recentEvents = workspace.recentEvents ?? [];
+                const primaryText = workspace.notice ?? recentEvents[0]?.message ?? statusLabels[workspace.status];
+                const historyItems = recentEvents.slice(1);
+
+                return (
+                  <div
+                    className="notificationItem"
+                    key={workspace.id}
+                  >
+                    <span className={`statusRing ${statusClass[workspace.status]}`} />
+                    <span className="notificationMain">
+                      <span className="notificationTitleRow">
+                        <span className="notificationWorkspace">{workspace.name}</span>
+                        <span className="notificationStatus">{statusLabels[workspace.status]}</span>
+                      </span>
+                      <span className="notificationText">{primaryText}</span>
+                      {historyItems.length > 0 && (
+                        <span className="notificationHistory" aria-label={`Recent events ${workspace.name}`}>
+                          {historyItems.map((event) => (
+                            <span className="notificationHistoryItem" key={event.id}>
+                              <span className={`historyDot ${statusClass[event.status]}`} />
+                              <span className="notificationHistoryText">{event.message}</span>
+                            </span>
+                          ))}
+                        </span>
+                      )}
                     </span>
-                    <span className="notificationText">{workspace.notice}</span>
-                  </span>
-                  <button
-                    className="notificationOpenButton"
-                    type="button"
-                    onClick={() => onSelect(workspace.id)}
-                  >
-                    Open
-                  </button>
-                  <button
-                    className="notificationClearButton"
-                    type="button"
-                    aria-label={`Clear notification ${workspace.name}`}
-                    onClick={() => onClearStatus(workspace.id)}
-                  >
-                    Clear
-                  </button>
-                </div>
-              ))
+                    <button
+                      className="notificationOpenButton"
+                      type="button"
+                      onClick={() => onSelect(workspace.id)}
+                    >
+                      Open
+                    </button>
+                    <button
+                      className="notificationClearButton"
+                      type="button"
+                      aria-label={`Clear notification ${workspace.name}`}
+                      onClick={() => onClearStatus(workspace.id)}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                );
+              })
             ) : (
               <div className="notificationEmpty">No workspace notifications</div>
             )}

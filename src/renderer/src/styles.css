@@ -437,7 +437,8 @@ kbd {
 }
 
 .notificationWorkspace,
-.notificationText {
+.notificationText,
+.notificationHistoryText {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -459,6 +460,30 @@ kbd {
 .notificationEmpty {
   color: var(--text-muted);
   font-size: 11px;
+}
+
+.notificationHistory {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding-top: 2px;
+}
+
+.notificationHistoryItem {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 8px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.historyDot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: currentColor;
 }
 
 .notificationOpenButton,

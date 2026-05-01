@@ -1055,6 +1055,10 @@ async function runCliSocketSmoke(window) {
   }
   await apiWorkspaceItem.getByText("Done").waitFor({ timeout: 15_000 });
   await apiWorkspaceItem.getByText("WMUX_STATUS_SET_OK").waitFor({ timeout: 15_000 });
+  await window
+    .getByLabel("Recent events API Server")
+    .getByText("WMUX_CLI_NOTIFY: socket smoke")
+    .waitFor({ timeout: 15_000 });
   const statusSetListJsonOutput = await runCliCommand(["status", "list", "--json"]);
   const statusSetList = JSON.parse(statusSetListJsonOutput);
   if (

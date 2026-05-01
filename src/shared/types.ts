@@ -170,6 +170,7 @@ export type WorkspaceSummary = {
   activePaneId: string;
   activeSurfaceId?: string;
   notice?: string;
+  recentEvents?: WorkspaceStatusEvent[];
 };
 
 export type SendTextParams = {
@@ -369,6 +370,13 @@ export type Surface = {
   status: WorkspaceStatus;
 };
 
+export type WorkspaceStatusEvent = {
+  id: string;
+  at: string;
+  status: WorkspaceStatus;
+  message: string;
+};
+
 export type Pane = {
   id: string;
   surfaceIds: string[];
@@ -396,6 +404,7 @@ export type Workspace = {
   ports: number[];
   status: WorkspaceStatus;
   notice?: string;
+  recentEvents?: WorkspaceStatusEvent[];
   layout: LayoutNode;
   panes: Record<string, Pane>;
   surfaces: Record<string, Surface>;
