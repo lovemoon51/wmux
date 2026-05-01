@@ -1717,9 +1717,13 @@ export function App(): ReactElement {
   const configStatusText = projectConfig?.found
     ? `${projectCommands.length} 个命令（${projectConfig.sources
         ?.filter((source) => source.found)
-        .map((source) => `${source.kind === "global" ? "全局" : "项目"} ${source.commandCount}`)
+        .map((source) => {
+          const label =
+            source.kind === "global" ? "全局" : source.path.replace(/\\/g, "/").endsWith(".cmux/cmux.json") ? "项目 .cmux" : "项目";
+          return `${label} ${source.commandCount}`;
+        })
         .join(" / ") || "项目"}）`
-    : "未发现 wmux.json";
+    : "未发现 wmux.json 或 .cmux/cmux.json";
   const configErrorText = projectConfig?.errors.join("；");
 
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];

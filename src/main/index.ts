@@ -472,16 +472,21 @@ function mergeWmuxCommands(globalCommands: WmuxCommandConfig[], projectCommands:
 
 async function loadProjectConfig(): Promise<WmuxProjectConfigResult> {
   const projectConfigPath = join(process.cwd(), "wmux.json");
+  const cmuxProjectConfigPath = join(process.cwd(), ".cmux", "cmux.json");
   const globalConfigPath = getGlobalConfigPath();
   const [globalResult, projectResult] = await Promise.all([
     readWmuxConfigSource("global", globalConfigPath),
     readWmuxConfigSource("project", projectConfigPath)
   ]);
-  const sources = [globalResult.source, projectResult.source];
-  const commands = mergeWmuxCommands(globalResult.config.commands, projectResult.config.commands);
+  const cmuxProjectResult = projectResult.source.found
+    ? undefined
+    : await readWmuxConfigSource("project", cmuxProjectConfigPath);
+  const selectedProjectResult = projectResult.source.found ? projectResult : cmuxProjectResult;
+  const sources = [globalResult.source, projectResult.source, ...(cmuxProjectResult ? [cmuxProjectResult.source] : [])];
+  const commands = mergeWmuxCommands(globalResult.config.commands, selectedProjectResult?.config.commands ?? []);
 
   return {
-    path: projectConfigPath,
+    path: selectedProjectResult?.source.found ? selectedProjectResult.source.path : projectConfigPath,
     found: sources.some((source) => source.found),
     config: { commands },
     errors: sources.flatMap((source) => source.errors),

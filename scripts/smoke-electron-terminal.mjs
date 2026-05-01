@@ -3,7 +3,7 @@ import electronPath from "electron";
 import { execFile, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -16,8 +16,111 @@ const smokePortServerPath = resolve("output/playwright/wmux-smoke-port-server.mj
 const globalConfigPath = resolve("output/playwright/wmux-global.json");
 const projectConfigPath = resolve("wmux.json");
 const projectConfigBackupPath = resolve("output/playwright/wmux-json.backup");
+const cmuxProjectConfigDir = resolve(".cmux");
+const cmuxProjectConfigPath = resolve(".cmux/cmux.json");
+const cmuxProjectConfigBackupPath = resolve("output/playwright/cmux-json.backup");
 const hadProjectConfig = existsSync(projectConfigPath);
 const originalProjectConfig = hadProjectConfig ? readFileSync(projectConfigPath, "utf8") : "";
+const hadCmuxProjectConfigDir = existsSync(cmuxProjectConfigDir);
+const hadCmuxProjectConfig = existsSync(cmuxProjectConfigPath);
+const originalCmuxProjectConfig = hadCmuxProjectConfig ? readFileSync(cmuxProjectConfigPath, "utf8") : "";
+const projectConfigText = `${JSON.stringify(
+  {
+    commands: [
+      {
+        name: "Run Smoke Marker",
+        description: "向当前终端写入 smoke 标记",
+        keywords: ["smoke", "marker"],
+        command: "Write-Output WMUX_COMMAND_SMOKE"
+      },
+      {
+        name: "Open Confirm Layout",
+        description: "确认后重建已有工作区",
+        keywords: ["layout", "confirm"],
+        restart: "confirm",
+        workspace: {
+          name: "Command Confirm Smoke",
+          cwd: ".",
+          layout: {
+            pane: {
+              surfaces: [
+                {
+                  type: "terminal",
+                  name: "Confirm Terminal",
+                  command: "Write-Output WMUX_CONFIRM_LAYOUT",
+                  focus: true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        name: "Open Recreate Layout",
+        description: "直接重建已有工作区",
+        keywords: ["layout", "recreate"],
+        restart: "recreate",
+        workspace: {
+          name: "Command Recreate Smoke",
+          cwd: ".",
+          layout: {
+            pane: {
+              surfaces: [
+                {
+                  type: "terminal",
+                  name: "Recreate Terminal",
+                  command: "Write-Output WMUX_RECREATE_LAYOUT",
+                  focus: true
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        name: "Open Dev Layout",
+        description: "创建包含终端和浏览器的工作区",
+        keywords: ["layout", "dev"],
+        restart: "ignore",
+        workspace: {
+          name: "Command Layout Smoke",
+          cwd: ".",
+          layout: {
+            direction: "horizontal",
+            split: 0.55,
+            children: [
+              {
+                pane: {
+                  surfaces: [
+                    {
+                      type: "terminal",
+                      name: "Layout Terminal",
+                      command: "Write-Output WMUX_LAYOUT_TERMINAL",
+                      focus: true
+                    }
+                  ]
+                }
+              },
+              {
+                pane: {
+                  surfaces: [
+                    {
+                      type: "browser",
+                      name: "Layout Browser",
+                      url: "data:text/html,<title>WMUX Layout</title><h1>WMUX_LAYOUT_BROWSER</h1>"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  null,
+  2
+)}\n`;
 rmSync(smokeUserDataPath, { force: true, recursive: true });
 mkdirSync(smokeUserDataPath, { recursive: true });
 mkdirSync(resolve("output/playwright"), { recursive: true });
@@ -35,6 +138,10 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
 );
 if (hadProjectConfig) {
   writeFileSync(projectConfigBackupPath, originalProjectConfig, "utf8");
+}
+if (hadCmuxProjectConfig) {
+  mkdirSync(dirname(cmuxProjectConfigBackupPath), { recursive: true });
+  writeFileSync(cmuxProjectConfigBackupPath, originalCmuxProjectConfig, "utf8");
 }
 writeFileSync(
   globalConfigPath,
@@ -62,103 +169,7 @@ writeFileSync(
 );
 writeFileSync(
   projectConfigPath,
-  `${JSON.stringify(
-    {
-      commands: [
-        {
-          name: "Run Smoke Marker",
-          description: "向当前终端写入 smoke 标记",
-          keywords: ["smoke", "marker"],
-          command: "Write-Output WMUX_COMMAND_SMOKE"
-        },
-        {
-          name: "Open Confirm Layout",
-          description: "确认后重建已有工作区",
-          keywords: ["layout", "confirm"],
-          restart: "confirm",
-          workspace: {
-            name: "Command Confirm Smoke",
-            cwd: ".",
-            layout: {
-              pane: {
-                surfaces: [
-                  {
-                    type: "terminal",
-                    name: "Confirm Terminal",
-                    command: "Write-Output WMUX_CONFIRM_LAYOUT",
-                    focus: true
-                  }
-                ]
-              }
-            }
-          }
-        },
-        {
-          name: "Open Recreate Layout",
-          description: "直接重建已有工作区",
-          keywords: ["layout", "recreate"],
-          restart: "recreate",
-          workspace: {
-            name: "Command Recreate Smoke",
-            cwd: ".",
-            layout: {
-              pane: {
-                surfaces: [
-                  {
-                    type: "terminal",
-                    name: "Recreate Terminal",
-                    command: "Write-Output WMUX_RECREATE_LAYOUT",
-                    focus: true
-                  }
-                ]
-              }
-            }
-          }
-        },
-        {
-          name: "Open Dev Layout",
-          description: "创建包含终端和浏览器的工作区",
-          keywords: ["layout", "dev"],
-          restart: "ignore",
-          workspace: {
-            name: "Command Layout Smoke",
-            cwd: ".",
-            layout: {
-              direction: "horizontal",
-              split: 0.55,
-              children: [
-                {
-                  pane: {
-                    surfaces: [
-                      {
-                        type: "terminal",
-                        name: "Layout Terminal",
-                        command: "Write-Output WMUX_LAYOUT_TERMINAL",
-                        focus: true
-                      }
-                    ]
-                  }
-                },
-                {
-                  pane: {
-                    surfaces: [
-                      {
-                        type: "browser",
-                        name: "Layout Browser",
-                        url: "data:text/html,<title>WMUX Layout</title><h1>WMUX_LAYOUT_BROWSER</h1>"
-                      }
-                    ]
-                  }
-                }
-              ]
-            }
-          }
-        }
-      ]
-    },
-    null,
-    2
-  )}\n`,
+  projectConfigText,
   "utf8"
 );
 
@@ -1561,7 +1572,41 @@ try {
   if (smokeMarkerCommands.length !== 1 || smokeMarkerCommands[0]?.source !== "project") {
     throw new Error(`Project wmux config did not override global command: ${JSON.stringify(loadedConfig)}`);
   }
+  if (!loadedConfig?.sources?.some((source) => source.path === projectConfigPath && source.found)) {
+    throw new Error(`Project wmux config source was not reported: ${JSON.stringify(loadedConfig)}`);
+  }
+  rmSync(projectConfigPath, { force: true });
+  mkdirSync(dirname(cmuxProjectConfigPath), { recursive: true });
+  writeFileSync(
+    cmuxProjectConfigPath,
+    `${JSON.stringify(
+      {
+        commands: [
+          {
+            name: "Run Cmux Fallback Marker",
+            description: "从 .cmux/cmux.json 写入 smoke 标记",
+            keywords: ["cmux", "fallback"],
+            command: "Write-Output WMUX_CMUX_FALLBACK"
+          }
+        ]
+      },
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+  const fallbackConfig = await window.evaluate(() => window.wmux?.config.loadProjectConfig());
+  const fallbackCommands = fallbackConfig?.config?.commands ?? [];
+  if (!fallbackCommands.some((command) => command.name === "Run Cmux Fallback Marker" && command.sourcePath === cmuxProjectConfigPath)) {
+    throw new Error(`.cmux/cmux.json fallback command was not loaded: ${JSON.stringify(fallbackConfig)}`);
+  }
+  if (!fallbackConfig?.sources?.some((source) => source.path === cmuxProjectConfigPath && source.found)) {
+    throw new Error(`.cmux/cmux.json fallback source was not reported: ${JSON.stringify(fallbackConfig)}`);
+  }
+  writeFileSync(projectConfigPath, projectConfigText, "utf8");
+  rmSync(cmuxProjectConfigPath, { force: true });
   log("ok global/project wmux config merge");
+  log("ok .cmux/cmux.json config fallback");
   const shellOptions = await window
     .locator('select[aria-label="Terminal shell"] option')
     .evaluateAll((options) => options.map((option) => ({ value: option.value, label: option.textContent })));
@@ -1678,8 +1723,18 @@ try {
   } else {
     rmSync(projectConfigPath, { force: true });
   }
+  if (hadCmuxProjectConfig) {
+    mkdirSync(cmuxProjectConfigDir, { recursive: true });
+    writeFileSync(cmuxProjectConfigPath, originalCmuxProjectConfig, "utf8");
+  } else {
+    rmSync(cmuxProjectConfigPath, { force: true });
+    if (!hadCmuxProjectConfigDir) {
+      rmSync(cmuxProjectConfigDir, { force: true, recursive: true });
+    }
+  }
   rmSync(globalConfigPath, { force: true });
   rmSync(projectConfigBackupPath, { force: true });
+  rmSync(cmuxProjectConfigBackupPath, { force: true });
 }
 
 process.exit(0);

@@ -71,6 +71,7 @@ export type WmuxConfigSource = {
   path: string;
   found: boolean;
   commandCount: number;
+  /** Compatibility fallback: project sources can be ./wmux.json or ./.cmux/cmux.json. */
   errors: string[];
 };
 

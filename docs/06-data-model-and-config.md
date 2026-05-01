@@ -4,11 +4,12 @@
 
 ```text
 Project: ./wmux.json
+Project compatibility fallback: ./.cmux/cmux.json
 Global macOS/Linux: ~/.config/wmux/wmux.json
 Global Windows: %APPDATA%/wmux/wmux.json
 ```
 
-项目配置优先于全局配置。同名 command 由项目配置覆盖。
+项目配置优先于全局配置。同名 command 由项目配置覆盖。项目根目录存在 `wmux.json` 时只读取它；不存在时才读取 `.cmux/cmux.json` 作为 cmux 兼容入口。两者使用同一套 schema，不引入并行配置模型。
 
 ## 2. `wmux.json` Schema 草案
 
@@ -182,4 +183,3 @@ create table command_history (
 - 已退出或运行中的真实进程。
 - vim/tmux/agent 的运行时内存状态。
 - 未保存的 shell 当前命令执行状态。
-
