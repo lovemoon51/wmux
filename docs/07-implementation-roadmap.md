@@ -115,7 +115,7 @@
 
 - P0 规格先行：[Browser Automation CLI/socket 规格设计](09-browser-automation-cli-socket-spec.md)。
 - identify/open/navigate/url。
-- wait selector/text/load-state。
+- wait selector/load-state（text selector 需先补小规格）。
 - click/fill/type/press。
 - snapshot/screenshot/get。
 - eval。

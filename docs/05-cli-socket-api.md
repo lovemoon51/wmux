@@ -108,6 +108,7 @@ wmux browser open https://example.com
 wmux browser navigate http://localhost:3000 --surface surface:3
 wmux browser screenshot --surface surface:3 --out /tmp/page.png
 wmux browser snapshot --surface surface:3
+wmux browser wait "#app" --surface surface:3
 wmux browser click "button[type='submit']" --surface surface:3
 wmux browser fill "#email" --text "dev@example.com" --surface surface:3
 wmux browser eval "document.title" --surface surface:3
@@ -146,6 +147,7 @@ wmux browser storage set --key wmux_local --value updated --surface surface:3
 | `browser.navigate` | `{ surfaceId, url }` | ok |
 | `browser.snapshot` | `{ surfaceId, selector?, compact? }` | snapshot |
 | `browser.screenshot` | `{ surfaceId, path? }` | path/base64 |
+| `browser.wait` | `{ surfaceId?, selector?, wait?, waitUntil?, timeoutMs? }` | matched selector or load state |
 | `browser.click` | `{ surfaceId, selector }` | ok |
 | `browser.fill` | `{ surfaceId, selector, text }` | ok |
 | `browser.eval` | `{ surfaceId, script }` | value |

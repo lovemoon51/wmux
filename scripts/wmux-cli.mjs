@@ -54,6 +54,7 @@ function printUsage() {
   wmux browser list [--json]
   wmux browser click <selector> [--timeout <ms>] [--wait visible|attached|none] [--json]
   wmux browser fill <selector> <text> [--text <text>] [--text-file <path>] [--json]
+  wmux browser wait [<selector>] [--selector <selector>] [--wait visible|attached|none] [--load-wait load|domcontentloaded|none] [--timeout <ms>] [--json]
   wmux browser eval <script> [--json]
   wmux browser eval-file <path> [--json]
   wmux browser console list [--surface <id>] [--limit <count>] [--json]
@@ -183,6 +184,28 @@ function readBrowserStorageArea() {
   return area;
 }
 
+function readBrowserLoadWaitOption(name) {
+  const waitUntil = parseOption(name);
+  if (waitUntil === undefined) {
+    return undefined;
+  }
+  if (waitUntil !== "none" && waitUntil !== "domcontentloaded" && waitUntil !== "load") {
+    throw cliError(`${name} 必须是 load、domcontentloaded 或 none`);
+  }
+  return waitUntil;
+}
+
+function readBrowserSelectorWaitOption() {
+  const wait = parseOption("--wait");
+  if (wait === undefined) {
+    return undefined;
+  }
+  if (wait !== "visible" && wait !== "attached" && wait !== "none") {
+    throw cliError("--wait 必须是 visible、attached 或 none");
+  }
+  return wait;
+}
+
 function readSelectorParams(allowCreate) {
   const surfaceId = parseOption("--surface");
   const paneId = parseOption("--pane");
@@ -223,7 +246,7 @@ function createBrowserRequest() {
         ...readSelectorParams(true),
         url,
         ...(browserCommand === "open" ? { createIfMissing: true, forceCreate: true } : {}),
-        ...(parseOption("--wait") ? { waitUntil: parseOption("--wait") } : {}),
+        ...(readBrowserLoadWaitOption("--wait") ? { waitUntil: readBrowserLoadWaitOption("--wait") } : {}),
         ...(readTimeout() ? { timeoutMs: readTimeout() } : {})
       }
     };
@@ -239,8 +262,23 @@ function createBrowserRequest() {
       params: {
         ...readSelectorParams(false),
         selector,
-        ...(parseOption("--wait") ? { wait: parseOption("--wait") } : {}),
-        ...(parseOption("--load-wait") ? { waitUntil: parseOption("--load-wait") } : {}),
+        ...(readBrowserSelectorWaitOption() ? { wait: readBrowserSelectorWaitOption() } : {}),
+        ...(readBrowserLoadWaitOption("--load-wait") ? { waitUntil: readBrowserLoadWaitOption("--load-wait") } : {}),
+        ...(readTimeout() ? { timeoutMs: readTimeout() } : {})
+      }
+    };
+  }
+
+  if (browserCommand === "wait") {
+    const positionalSelector = args[2] && !args[2].startsWith("--") ? args[2] : undefined;
+    const selector = parseOption("--selector") ?? positionalSelector;
+    return {
+      method: "browser.wait",
+      params: {
+        ...readSelectorParams(false),
+        ...(selector ? { selector } : {}),
+        ...(readBrowserSelectorWaitOption() ? { wait: readBrowserSelectorWaitOption() } : {}),
+        ...(readBrowserLoadWaitOption("--load-wait") ? { waitUntil: readBrowserLoadWaitOption("--load-wait") } : {}),
         ...(readTimeout() ? { timeoutMs: readTimeout() } : {})
       }
     };
@@ -356,7 +394,7 @@ function createBrowserRequest() {
         ...readSelectorParams(false),
         selector,
         text: textFile ? readFileSync(resolve(textFile), "utf8") : textValues[0],
-        ...(parseOption("--wait") ? { wait: parseOption("--wait") } : {}),
+        ...(readBrowserSelectorWaitOption() ? { wait: readBrowserSelectorWaitOption() } : {}),
         ...(readTimeout() ? { timeoutMs: readTimeout() } : {})
       }
     };
@@ -837,6 +875,14 @@ function printBrowserResult(result) {
   }
   if (browserCommand === "click") {
     console.log(`clicked ${result?.selector ?? "selector"}`);
+    return;
+  }
+  if (browserCommand === "wait") {
+    if (result?.selector) {
+      console.log(`waited ${result.selector}`);
+    } else {
+      console.log(`waited ${result?.waitUntil ?? "load-state"}`);
+    }
     return;
   }
   console.log(result?.url ?? JSON.stringify(result));

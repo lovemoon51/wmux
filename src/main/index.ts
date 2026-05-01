@@ -527,6 +527,7 @@ function isBrowserRpcMethod(method: string): method is BrowserRpcMethod {
     method === "browser.navigate" ||
     method === "browser.click" ||
     method === "browser.fill" ||
+    method === "browser.wait" ||
     method === "browser.eval" ||
     method === "browser.snapshot" ||
     method === "browser.list" ||

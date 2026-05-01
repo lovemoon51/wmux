@@ -158,6 +158,7 @@ type BrowserWaitOptions = {
 - `navigate` 在 webview 导航到目标 URL 后开始等待 `waitUntil`。
 - `click` 完成点击后不默认等待导航；用户可传 `waitUntil`。
 - `fill` 完成输入后立即返回。
+- `wait` 可等待 selector，也可等待当前页面 load state；未传 `--load-wait` 时 selector wait 不额外等待 load。
 - `eval` 执行脚本时不额外等待。
 - `snapshot` 等待 document 存在即可。
 - `screenshot` 等待 webview 有非零尺寸。
@@ -366,7 +367,68 @@ CLI 规则：
 - `--text-file` 从 UTF-8 文件读取文本。
 - 同时传位置文本、`--text`、`--text-file` 时返回 CLI 使用错误。
 
-### 7.5 `browser.eval`
+### 7.5 `browser.wait`
+
+Params:
+
+```ts
+{
+  surfaceId?: string;
+  paneId?: string;
+  workspaceId?: string;
+  active?: boolean;
+  selector?: string;
+  timeoutMs?: number;
+  wait?: "visible" | "attached" | "none";
+  waitUntil?: "none" | "domcontentloaded" | "load";
+}
+```
+
+Result:
+
+```ts
+// selector wait
+{
+  surfaceId: string;
+  selector: string;
+  matched: number;
+  wait: "visible" | "attached" | "none";
+  waitUntil: "none" | "domcontentloaded" | "load";
+  url: string;
+}
+
+// load-state wait
+{
+  surfaceId: string;
+  waitUntil: "domcontentloaded" | "load";
+  url: string;
+}
+```
+
+Rules:
+
+- 传 `selector` 时等待 selector 满足 `wait`；默认 `wait=visible`。
+- 未传 `waitUntil` 时，selector wait 不额外等待 load state。
+- 未传 `selector` 时必须传 `waitUntil=domcontentloaded|load`。
+- P0 不支持 text/role selector；后续实现 text selector 前必须先补小规格。
+
+Errors:
+
+- `BAD_REQUEST`: selector 和有效 waitUntil 均缺失，或传入 `createIfMissing: true`。
+- `NOT_FOUND`: 找不到 browser surface。
+- `AMBIGUOUS_TARGET`: surface 选择不唯一。
+- `TIMEOUT`: selector 或 load state 未在 timeout 内满足条件。
+- `BROWSER_ERROR`: webview 状态读取失败。
+
+CLI:
+
+```bash
+wmux browser wait "#app"
+wmux browser wait --selector "#app" --wait attached --timeout 8000
+wmux browser wait --load-wait load --surface <surfaceId>
+```
+
+### 7.6 `browser.eval`
 
 Params:
 
@@ -419,7 +481,7 @@ CLI 输出：
 - 默认输出 `value` 的文本形式。
 - `--json` 输出完整 socket result JSON。
 
-### 7.6 `browser.snapshot`
+### 7.7 `browser.snapshot`
 
 Params:
 
@@ -498,7 +560,7 @@ Errors:
 - `TIMEOUT`: snapshot 等待超时。
 - `BROWSER_ERROR`: DOM snapshot 失败。
 
-### 7.7 `browser.screenshot`
+### 7.8 `browser.screenshot`
 
 Params:
 
@@ -556,7 +618,7 @@ wmux browser screenshot --selector "#app" --out app.png
 wmux browser screenshot --base64
 ```
 
-### 7.8 `browser.cookies.list`
+### 7.9 `browser.cookies.list`
 
 Params:
 
@@ -597,7 +659,7 @@ wmux browser cookies list --surface <surfaceId>
 wmux browser cookies list --surface <surfaceId> --json
 ```
 
-### 7.9 `browser.storage.list|get|set`
+### 7.10 `browser.storage.list|get|set`
 
 Params:
 
@@ -680,7 +742,7 @@ wmux browser storage set --key wmux_local --value updated --surface <surfaceId>
 - `--active` 与显式 id 同传时返回 CLI 使用错误。
 - `--create` 只允许 `browser navigate`，映射到 `createIfMissing: true`。
 - `wmux browser open <url>` 是 CLI alias，等价于 `wmux browser navigate <url> --create`，不新增 socket method。
-- `browser click/fill/eval/snapshot/screenshot/console/errors/cookies/storage --create` 必须返回 CLI 使用错误，exit code `2`。
+- `browser click/fill/wait/eval/snapshot/screenshot/console/errors/cookies/storage --create` 必须返回 CLI 使用错误，exit code `2`。
 - `--timeout` 单位毫秒。
 - `--json` 输出完整 JSON 响应；否则输出人类可读结果。
 
@@ -745,17 +807,18 @@ INTERNAL
 6. CLI 调 `wmux browser navigate "data:text/html,..."`。
 7. CLI 调 `wmux browser list --json`，断言包含当前 browser surface。
 8. CLI 调 `wmux browser snapshot --json`，断言包含页面标题和按钮。
-9. CLI 调 `wmux browser fill "#name" "wmux"`，再 `eval "document.querySelector('#name').value"`，断言为 `wmux`。
-10. CLI 调 `wmux browser click "#submit"`，断言页面显示 `clicked: wmux`。
-11. CLI 调 `wmux browser eval "document.body.dataset.clicked"`，断言为 `wmux`。
-12. CLI 调 `wmux browser screenshot --out output/playwright/browser-automation-smoke.png`，断言文件存在且大于 1KB。
-13. CLI 调 `wmux browser screenshot --base64 --json`，断言 `mimeType` 和 `base64` 存在。
-14. 创建第二个 browser surface 后调用 `wmux browser snapshot`，断言返回 `AMBIGUOUS_TARGET` 且 CLI 输出候选 `--surface <id>`；再用 `--surface` 精确指定并成功。
-15. CLI 调 `wmux browser console list --surface <id> --json` 和 `wmux browser errors list --surface <id> --json`，断言可读取页面 console log/error，且 errors 只返回 error 级别。
-16. CLI 导航到同源 HTTP storage 测试页，调用 `wmux browser cookies list --surface <id> --json`，断言可读取脚本可见 cookie。
-17. CLI 调 `wmux browser storage list/get/set --surface <id> --json`，断言 localStorage 和 sessionStorage 可读写。
-18. 调用 `wmux browser click "#submit" --create`，断言 CLI exit code 为 `2`。
-19. 关闭 Electron，清理临时 userData。
+9. CLI 调 `wmux browser wait "#submit" --json` 和 `wmux browser wait --load-wait domcontentloaded --json`，断言 selector/load-state 等待成功。
+10. CLI 调 `wmux browser fill "#name" "wmux"`，再 `eval "document.querySelector('#name').value"`，断言为 `wmux`。
+11. CLI 调 `wmux browser click "#submit"`，断言页面显示 `clicked: wmux`。
+12. CLI 调 `wmux browser eval "document.body.dataset.clicked"`，断言为 `wmux`。
+13. CLI 调 `wmux browser screenshot --out output/playwright/browser-automation-smoke.png`，断言文件存在且大于 1KB。
+14. CLI 调 `wmux browser screenshot --base64 --json`，断言 `mimeType` 和 `base64` 存在。
+15. 创建第二个 browser surface 后调用 `wmux browser snapshot`，断言返回 `AMBIGUOUS_TARGET` 且 CLI 输出候选 `--surface <id>`；再用 `--surface` 精确指定并成功。
+16. CLI 调 `wmux browser console list --surface <id> --json` 和 `wmux browser errors list --surface <id> --json`，断言可读取页面 console log/error，且 errors 只返回 error 级别。
+17. CLI 导航到同源 HTTP storage 测试页，调用 `wmux browser cookies list --surface <id> --json`，断言可读取脚本可见 cookie。
+18. CLI 调 `wmux browser storage list/get/set --surface <id> --json`，断言 localStorage 和 sessionStorage 可读写。
+19. 调用 `wmux browser click "#submit" --create`，断言 CLI exit code 为 `2`。
+20. 关闭 Electron，清理临时 userData。
 
 测试页面：
 
@@ -781,6 +844,7 @@ ok browser terminal link opens internal browser
 ok browser navigate
 ok browser list
 ok browser snapshot
+ok browser wait
 ok browser fill
 ok browser click
 ok browser console/errors list

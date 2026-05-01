@@ -48,6 +48,7 @@ import type {
   BrowserSnapshotNode,
   BrowserSnapshotParams,
   BrowserSurfaceSelector,
+  BrowserWaitParams,
   BrowserWaitUntil,
   ClearStatusParams,
   LayoutNode,
@@ -134,6 +135,7 @@ type BrowserRuntime = {
   viewId?: number;
   webview: BrowserWebviewElement;
   navigate: (url: string, waitUntil: BrowserWaitUntil, timeoutMs: number) => Promise<string>;
+  waitForLoadState: (waitUntil: BrowserWaitUntil, timeoutMs: number) => Promise<string>;
   consoleEntries: BrowserConsoleEntry[];
 };
 
@@ -910,6 +912,7 @@ const socketCapabilities: SocketRpcMethod[] = [
   "browser.navigate",
   "browser.click",
   "browser.fill",
+  "browser.wait",
   "browser.eval",
   "browser.snapshot",
   "browser.list",
@@ -927,6 +930,7 @@ function isBrowserRpcMethod(method: string): method is BrowserRpcMethod {
     method === "browser.navigate" ||
     method === "browser.click" ||
     method === "browser.fill" ||
+    method === "browser.wait" ||
     method === "browser.eval" ||
     method === "browser.snapshot" ||
     method === "browser.list" ||
@@ -969,6 +973,14 @@ function readBrowserWaitUntil(params: unknown): BrowserWaitUntil {
   }
 
   return "domcontentloaded";
+}
+
+function readBrowserWaitUntilOrNone(params: unknown): BrowserWaitUntil {
+  if (isRecord(params) && (params.waitUntil === "none" || params.waitUntil === "domcontentloaded" || params.waitUntil === "load")) {
+    return params.waitUntil;
+  }
+
+  return "none";
 }
 
 function readSelectorWait(params: unknown): BrowserSelectorWait {
@@ -1401,6 +1413,34 @@ function getSelectorActionScript(action: "click" | "fill", selector: string, wai
   }))()`;
 }
 
+function getWaitForSelectorScript(selector: string, wait: BrowserSelectorWait, timeoutMs: number): string {
+  return `(() => new Promise((resolve, reject) => {
+    const selector = ${serializeForInjectedScript(selector)};
+    const wait = ${serializeForInjectedScript(wait)};
+    const timeoutMs = ${timeoutMs};
+    const startedAt = Date.now();
+    const isVisible = (element) => {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    };
+    const tick = () => {
+      const matches = Array.from(document.querySelectorAll(selector));
+      const element = matches.find((item) => wait !== "visible" || isVisible(item));
+      if (!element && Date.now() - startedAt < timeoutMs) {
+        window.setTimeout(tick, 50);
+        return;
+      }
+      if (!element) {
+        reject(Object.assign(new Error("selector did not appear before timeout"), { code: "TIMEOUT", matched: matches.length }));
+        return;
+      }
+      resolve({ matched: matches.length, selector, url: location.href });
+    };
+    tick();
+  }))()`;
+}
+
 function getSnapshotScript(params: BrowserSnapshotParams): string {
   return `(() => {
     const rootSelector = ${serializeForInjectedScript(params.selector)};
@@ -1697,6 +1737,30 @@ async function runBrowserRpc(
       timeoutMs + 500
     );
     return { ...commonResult, selector: fillParams.selector, filled: true, valueLength: result.valueLength };
+  }
+
+  if (method === "browser.wait") {
+    const waitParams = (isRecord(params) ? params : {}) as BrowserWaitParams;
+    const timeoutMs = getBrowserTimeout(params, 5000);
+    const waitUntil = readBrowserWaitUntilOrNone(params);
+    if (typeof waitParams.selector === "string" && waitParams.selector.trim()) {
+      const result = await executeBrowserJavaScript<{ matched: number; selector: string; url: string }>(
+        runtime,
+        getWaitForSelectorScript(waitParams.selector, readSelectorWait(params), timeoutMs),
+        timeoutMs + 500
+      );
+      if (waitUntil !== "none") {
+        const url = await runtime.waitForLoadState(waitUntil, timeoutMs);
+        return { ...commonResult, selector: result.selector, matched: result.matched, wait: readSelectorWait(params), waitUntil, url };
+      }
+      return { ...commonResult, selector: result.selector, matched: result.matched, wait: readSelectorWait(params), waitUntil, url: result.url };
+    }
+
+    if (waitUntil === "none") {
+      throw createBrowserError("BAD_REQUEST", "browser.wait 需要 selector 或 waitUntil");
+    }
+    const url = await runtime.waitForLoadState(waitUntil, timeoutMs);
+    return { ...commonResult, waitUntil, url };
   }
 
   if (method === "browser.eval") {
@@ -4787,6 +4851,114 @@ function BrowserSurface({
     [navigate, surface.id]
   );
 
+  const waitForBrowserLoadState = useCallback(
+    (waitUntil: BrowserWaitUntil, timeoutMs: number): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        const webview = webviewRef.current;
+        if (!webview) {
+          reject(createBrowserError("BROWSER_ERROR", "browser webview 尚未就绪", { surfaceId: surface.id }));
+          return;
+        }
+        if (waitUntil === "none") {
+          window.setTimeout(() => resolve(webview.getURL?.() ?? url), 0);
+          return;
+        }
+
+        let settled = false;
+        const cleanup = (): void => {
+          webview.removeEventListener("did-fail-load", handleFailLoad);
+          webview.removeEventListener("did-finish-load", handleLoad);
+          webview.removeEventListener("dom-ready", handleDomContentLoaded);
+          window.clearTimeout(timer);
+        };
+        const settle = (callback: () => void): void => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          cleanup();
+          callback();
+        };
+        const handleFailLoad = (event: Event): void => {
+          const failure = event as BrowserLoadFailureEvent;
+          if (isIgnorableBrowserLoadFailure(failure, webview.getURL?.() ?? url)) {
+            return;
+          }
+          settle(() =>
+            reject(
+              createBrowserError("BROWSER_ERROR", failure.errorDescription || "browser load failed", {
+                surfaceId: surface.id,
+                url: webview.getURL?.() ?? url
+              })
+            )
+          );
+        };
+        const handleDomContentLoaded = (): void => {
+          if (waitUntil === "domcontentloaded") {
+            settle(() => resolve(webview.getURL?.() ?? url));
+          }
+        };
+        const handleLoad = (): void => {
+          if (waitUntil === "load") {
+            settle(() => resolve(webview.getURL?.() ?? url));
+          }
+        };
+        const timer = window.setTimeout(() => {
+          settle(() =>
+            reject(
+              createBrowserError("TIMEOUT", "browser load state timeout", {
+                surfaceId: surface.id,
+                url: webview.getURL?.() ?? url,
+                timeoutMs
+              })
+            )
+          );
+        }, timeoutMs);
+
+        webview.addEventListener("did-fail-load", handleFailLoad);
+        webview.addEventListener("did-finish-load", handleLoad);
+        webview.addEventListener("dom-ready", handleDomContentLoaded);
+        executeBrowserJavaScript<boolean>(
+          {
+            surfaceId: surface.id,
+            runtimeId: surface.id,
+            webview,
+            navigate: navigateBrowserRuntime,
+            waitForLoadState: waitForBrowserLoadState,
+            consoleEntries: consoleEntriesRef.current
+          },
+          "document.readyState === 'interactive' || document.readyState === 'complete'",
+          Math.min(timeoutMs, 1000)
+        )
+          .then((ready) => {
+            if (ready && waitUntil === "domcontentloaded") {
+              settle(() => resolve(webview.getURL?.() ?? url));
+            }
+          })
+          .catch(() => {});
+        executeBrowserJavaScript<boolean>(
+          {
+            surfaceId: surface.id,
+            runtimeId: surface.id,
+            webview,
+            navigate: navigateBrowserRuntime,
+            waitForLoadState: waitForBrowserLoadState,
+            consoleEntries: consoleEntriesRef.current
+          },
+          "document.readyState === 'complete'",
+          Math.min(timeoutMs, 1000)
+        )
+          .then((ready) => {
+            if (ready && waitUntil === "load") {
+              settle(() => resolve(webview.getURL?.() ?? url));
+            }
+          })
+          .catch(() => {});
+      });
+    },
+    [navigateBrowserRuntime, surface.id, url]
+  );
+
   useEffect(() => {
     const webview = webviewRef.current;
     if (!webview) {
@@ -4798,6 +4970,7 @@ function BrowserSurface({
       runtimeId: surface.id,
       webview,
       navigate: navigateBrowserRuntime,
+      waitForLoadState: waitForBrowserLoadState,
       consoleEntries: consoleEntriesRef.current
     });
 

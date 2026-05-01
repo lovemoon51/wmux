@@ -290,6 +290,20 @@ try {
   }
   log("ok browser selector snapshot");
 
+  const waitSelector = parseJson(
+    (await runCli(["browser", "wait", "#submit", "--surface", navigate.surfaceId, "--json"])).stdout
+  );
+  if (waitSelector.selector !== "#submit" || waitSelector.matched < 1) {
+    throw new Error(`browser wait selector returned unexpected value: ${JSON.stringify(waitSelector)}`);
+  }
+  const waitLoad = parseJson(
+    (await runCli(["browser", "wait", "--load-wait", "domcontentloaded", "--surface", navigate.surfaceId, "--json"])).stdout
+  );
+  if (waitLoad.waitUntil !== "domcontentloaded" || !waitLoad.url?.startsWith("data:text/html")) {
+    throw new Error(`browser wait load state returned unexpected value: ${JSON.stringify(waitLoad)}`);
+  }
+  log("ok browser wait");
+
   await runCli(["browser", "fill", "#name", "wmux", "--surface", navigate.surfaceId]);
   const filledValue = parseJson(
     (await runCli(["browser", "eval", "document.querySelector('#name').value", "--surface", navigate.surfaceId, "--json"])).stdout
