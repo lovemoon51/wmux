@@ -15,6 +15,28 @@ const sessions = new Map<string, TerminalSession>();
 const pendingInputs = new Map<string, string[]>();
 const maxPendingInputItems = 20;
 
+// 终端输出环形缓冲：按 surface id 保留近期输出，attach 时回放
+// 解决 renderer 重挂载（切 surface、调整布局）后 xterm 缓冲清空的问题
+const outputBuffers = new Map<string, string>();
+const outputBufferMaxBytes = 256 * 1024;
+const outputBufferTrimBytes = 192 * 1024;
+
+function appendOutputBuffer(id: string, chunk: string): void {
+  if (!chunk) {
+    return;
+  }
+  const previous = outputBuffers.get(id) ?? "";
+  const next = previous + chunk;
+  if (next.length <= outputBufferMaxBytes) {
+    outputBuffers.set(id, next);
+    return;
+  }
+  // 超阈值：保留尾部 trim 大小，再对齐到下一个换行避免半截 ANSI 序列
+  const sliced = next.slice(-outputBufferTrimBytes);
+  const newlineIdx = sliced.indexOf("\n");
+  outputBuffers.set(id, newlineIdx >= 0 ? sliced.slice(newlineIdx + 1) : sliced);
+}
+
 // OSC 9 / 99 / 777 通知序列：ESC ] code ; payload (BEL | ESC \)
 // 仅识别这三个 code，其他 OSC（0 set-title、8 hyperlink）原样透传
 // eslint-disable-next-line no-control-regex
@@ -166,6 +188,16 @@ export function registerPtyIpc(): void {
     (event, payload: { id: string; cwd?: string; cols?: number; rows?: number; shell?: ShellProfile }) => {
       const existing = sessions.get(payload.id);
       if (existing) {
+        // 同会话重 attach：更新 owner，回放历史输出
+        existing.owner = event.sender;
+        const replay = outputBuffers.get(payload.id);
+        if (replay) {
+          // 重置 SGR 与光标，避免半截 ANSI 序列污染渲染
+          event.sender.send("terminal:data", {
+            id: payload.id,
+            data: `\x1b[0m${replay}`
+          });
+        }
         return { id: payload.id };
       }
 
@@ -196,22 +228,32 @@ export function registerPtyIpc(): void {
       }
 
       pty.onData((data) => {
-        if (event.sender.isDestroyed()) {
+        // 始终读取最新 owner：re-attach 可能更换 sender
+        const sender = sessions.get(payload.id)?.owner;
+        if (!sender || sender.isDestroyed()) {
+          // 缓冲 OSC 之外的输出，等待下一次 attach 回放
+          const { cleaned } = extractOscNotifications(payload.id, data);
+          if (cleaned) {
+            appendOutputBuffer(payload.id, cleaned);
+          }
           return;
         }
         const { cleaned, notifications } = extractOscNotifications(payload.id, data);
         if (cleaned) {
-          event.sender.send("terminal:data", { id: payload.id, data: cleaned });
+          appendOutputBuffer(payload.id, cleaned);
+          sender.send("terminal:data", { id: payload.id, data: cleaned });
         }
         for (const notification of notifications) {
-          event.sender.send("terminal:notification", notification);
+          sender.send("terminal:notification", notification);
         }
       });
 
       pty.onExit(({ exitCode, signal }) => {
         sessions.delete(payload.id);
-        if (!event.sender.isDestroyed()) {
-          event.sender.send("terminal:exit", { id: payload.id, exitCode, signal });
+        outputBuffers.delete(payload.id);
+        const sender = event.sender;
+        if (!sender.isDestroyed()) {
+          sender.send("terminal:exit", { id: payload.id, exitCode, signal });
         }
       });
 
@@ -251,6 +293,7 @@ export function registerPtyIpc(): void {
 
 function disposeTerminal(id: string): void {
   pendingInputs.delete(id);
+  outputBuffers.delete(id);
   const session = sessions.get(id);
   if (!session) {
     return;
