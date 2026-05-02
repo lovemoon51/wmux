@@ -348,6 +348,67 @@ kbd {
   font-size: 10px;
 }
 
+/* PR 状态 pill：颜色按 state 分类，复用 metaPill 框架 */
+.metaPillPr {
+  border-color: currentColor;
+}
+
+.metaPillPr-open {
+  color: var(--accent);
+}
+
+.metaPillPr-draft {
+  color: var(--text-muted);
+}
+
+.metaPillPr-merged {
+  color: var(--success);
+}
+
+.metaPillPr-closed {
+  color: var(--danger);
+}
+
+/* 未读通知 badge：显示在 workspaceTitleRow，attention 色背景 */
+.workspaceUnreadBadge {
+  flex: none;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--attention);
+  color: #101214;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+/* statusRing 脉冲：仅 attention/error 触发，2.4s 缓动周期；
+   依赖现有 .statusRing 的 currentColor 继承状态色，
+   外扩 box-shadow 模拟"光环呼吸" */
+@keyframes wmuxStatusRingPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 currentColor;
+  }
+  50% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
+
+.statusRing.statusAttention,
+.statusRing.statusError {
+  animation: wmuxStatusRingPulse 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .statusRing.statusAttention,
+  .statusRing.statusError {
+    animation: none;
+  }
+}
+
 .sidebarFooter {
   display: grid;
   gap: 7px;

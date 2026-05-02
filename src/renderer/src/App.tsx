@@ -5,6 +5,7 @@ import {
   Command,
   ExternalLink,
   GitBranch,
+  GitPullRequest,
   Globe,
   LayoutGrid,
   Pencil,
@@ -57,6 +58,7 @@ import type {
   LayoutNode,
   NotifyParams,
   PersistedAppState,
+  PullRequestSummary,
   SendKeyParams,
   SendTextParams,
   ShellProfile,
@@ -468,6 +470,20 @@ function withWorkspaceStatusEvent(workspace: Workspace, input: WorkspaceStatusEv
     ...workspace,
     recentEvents: [event, ...(workspace.recentEvents ?? [])].slice(0, maxWorkspaceStatusEvents)
   };
+}
+
+// 未读数 = recentEvents 中事件时间晚于 lastViewedAt 的条目数；缺 lastViewedAt 视为全部未读
+// 注意：recentEvents 上限 maxWorkspaceStatusEvents（4），未读 badge 因此实际范围 0..4
+function getWorkspaceUnreadCount(workspace: Workspace): number {
+  const events = workspace.recentEvents ?? [];
+  if (events.length === 0) {
+    return 0;
+  }
+  const lastViewedAt = workspace.lastViewedAt;
+  if (!lastViewedAt) {
+    return events.length;
+  }
+  return events.filter((event) => event.at > lastViewedAt).length;
 }
 
 function detectTerminalAttentionPrompt(output: string): TerminalAttentionPrompt | undefined {
@@ -2015,7 +2031,20 @@ function createSurfaceSummaries(workspaces: Workspace[], activeWorkspaceId: stri
 function shouldApplyWorkspaceInspection(workspace: Workspace, inspection: WorkspaceInspection): boolean {
   const nextBranch = inspection.branch;
   const nextPorts = inspection.ports;
-  return workspace.branch !== nextBranch || workspace.ports.join(",") !== nextPorts.join(",");
+  const currentPullRequestKey = serializePullRequestForCompare(workspace.pullRequest);
+  const nextPullRequestKey = serializePullRequestForCompare(inspection.pullRequest);
+  return (
+    workspace.branch !== nextBranch ||
+    workspace.ports.join(",") !== nextPorts.join(",") ||
+    currentPullRequestKey !== nextPullRequestKey
+  );
+}
+
+function serializePullRequestForCompare(value: PullRequestSummary | undefined): string {
+  if (!value) {
+    return "";
+  }
+  return `${value.number}|${value.state}|${value.title ?? ""}|${value.url ?? ""}`;
 }
 
 function shouldIgnoreGlobalShortcut(event: KeyboardEvent): boolean {
@@ -2297,7 +2326,8 @@ export function App(): ReactElement {
           return {
             ...workspace,
             branch: inspection.branch,
-            ports: inspection.ports
+            ports: inspection.ports,
+            pullRequest: inspection.pullRequest
           };
         })
       );
@@ -2307,6 +2337,54 @@ export function App(): ReactElement {
       isCancelled = true;
     };
   }, [hasHydratedPersistedState, workspaces.map((workspace) => workspace.cwd).join("\n")]);
+
+  // 周期刷新 workspace 检视：拉取最新 branch / ports / PR 状态（gh CLI），60s 间隔
+  useEffect(() => {
+    if (!hasHydratedPersistedState) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      const uniqueCwds = [...new Set(workspaces.map((workspace) => workspace.cwd))];
+      if (!uniqueCwds.length) {
+        return;
+      }
+      void Promise.all(
+        uniqueCwds.map((cwd) =>
+          window.wmux?.workspace
+            .inspectCwd(cwd)
+            .then((inspection) => ({ cwd, inspection }))
+            .catch(() => null)
+        )
+      ).then((results) => {
+        const inspectionByCwd = new Map<string, WorkspaceInspection>();
+        results.forEach((result) => {
+          if (result?.inspection) {
+            inspectionByCwd.set(result.cwd, result.inspection);
+          }
+        });
+        if (!inspectionByCwd.size) {
+          return;
+        }
+        setWorkspaces((currentWorkspaces) =>
+          currentWorkspaces.map((workspace) => {
+            const inspection = inspectionByCwd.get(workspace.cwd);
+            if (!inspection || !shouldApplyWorkspaceInspection(workspace, inspection)) {
+              return workspace;
+            }
+            return {
+              ...workspace,
+              branch: inspection.branch,
+              ports: inspection.ports,
+              pullRequest: inspection.pullRequest
+            };
+          })
+        );
+      });
+    }, 60_000);
+
+    return () => window.clearInterval(intervalId);
+  }, [hasHydratedPersistedState, workspaces]);
 
   useEffect(() => {
     if (selectedCommandIndex > normalizedSelectedCommandIndex) {
@@ -2464,6 +2542,19 @@ export function App(): ReactElement {
     });
     return cleanup;
   }, []);
+
+  // active workspace 切换时为该 workspace 标记已读时间戳：unread badge 据此清零
+  useEffect(() => {
+    if (!activeWorkspaceId) {
+      return;
+    }
+    const at = new Date().toISOString();
+    setWorkspaces((currentWorkspaces) =>
+      currentWorkspaces.map((workspace) =>
+        workspace.id === activeWorkspaceId ? { ...workspace, lastViewedAt: at } : workspace
+      )
+    );
+  }, [activeWorkspaceId]);
 
   const runSimpleCommand = (command: WmuxCommandConfig): void => {
     if (!command.command) {
@@ -4429,6 +4520,8 @@ function WorkspaceSidebar({
       <div className="workspaceList">
         {workspaces.map((workspace) => {
           const isEditing = workspace.id === editingWorkspaceId;
+          const unreadCount = getWorkspaceUnreadCount(workspace);
+          const pullRequest = workspace.pullRequest;
           return (
             <div
               className={`workspaceItem ${workspace.id === activeWorkspaceId ? "workspaceItemActive" : ""}`}
@@ -4458,6 +4551,14 @@ function WorkspaceSidebar({
                         }}
                       />
                       <span className="workspaceStatus">{statusLabels[workspace.status]}</span>
+                      {unreadCount > 0 && (
+                        <span
+                          className="workspaceUnreadBadge"
+                          aria-label={`${unreadCount} unread notification${unreadCount === 1 ? "" : "s"}`}
+                        >
+                          {unreadCount > 9 ? "9+" : unreadCount}
+                        </span>
+                      )}
                     </span>
                     <span className="workspacePath">{workspace.cwd}</span>
                     <span className="workspaceMeta">
@@ -4465,6 +4566,15 @@ function WorkspaceSidebar({
                         <span className="metaPill">
                           <GitBranch size={12} />
                           {workspace.branch}
+                        </span>
+                      )}
+                      {pullRequest && (
+                        <span
+                          className={`metaPill metaPillPr metaPillPr-${pullRequest.state}`}
+                          title={pullRequest.title ?? `PR #${pullRequest.number}`}
+                        >
+                          <GitPullRequest size={12} />
+                          {`#${pullRequest.number} ${pullRequest.state}`}
                         </span>
                       )}
                       {workspace.ports.map((port) => (
@@ -4495,6 +4605,14 @@ function WorkspaceSidebar({
                   <span className="workspaceTitleRow">
                     <span className="workspaceName">{workspace.name}</span>
                     <span className="workspaceStatus">{statusLabels[workspace.status]}</span>
+                    {unreadCount > 0 && (
+                      <span
+                        className="workspaceUnreadBadge"
+                        aria-label={`${unreadCount} unread notification${unreadCount === 1 ? "" : "s"}`}
+                      >
+                        {unreadCount > 9 ? "9+" : unreadCount}
+                      </span>
+                    )}
                   </span>
                   <span className="workspacePath">{workspace.cwd}</span>
                   <span className="workspaceMeta">
@@ -4502,6 +4620,15 @@ function WorkspaceSidebar({
                       <span className="metaPill">
                         <GitBranch size={12} />
                         {workspace.branch}
+                      </span>
+                    )}
+                    {pullRequest && (
+                      <span
+                        className={`metaPill metaPillPr metaPillPr-${pullRequest.state}`}
+                        title={pullRequest.title ?? `PR #${pullRequest.number}`}
+                      >
+                        <GitPullRequest size={12} />
+                        {`#${pullRequest.number} ${pullRequest.state}`}
                       </span>
                     )}
                     {workspace.ports.map((port) => (

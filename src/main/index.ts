@@ -16,6 +16,8 @@ import {
 import type {
   BrowserRpcMethod,
   PersistedAppState,
+  PullRequestState,
+  PullRequestSummary,
   SocketSecurityMode,
   SocketSecuritySettings,
   SocketRpcRequest,
@@ -310,10 +312,12 @@ function parseProjectConfig(
 async function inspectWorkspaceCwd(cwd: string): Promise<WorkspaceInspection> {
   const resolvedCwd = resolve(cwd);
   const [branch, ports] = await Promise.all([detectGitBranch(resolvedCwd), detectListeningPorts(resolvedCwd)]);
+  const pullRequest = await detectPullRequest(resolvedCwd, branch);
   return {
     cwd: resolvedCwd.replace(/\\/g, "/"),
     branch,
-    ports
+    ports,
+    pullRequest
   };
 }
 
@@ -333,6 +337,58 @@ async function detectGitBranch(cwd: string): Promise<string | undefined> {
       windowsHide: true
     });
     return head.stdout.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// 通过 gh CLI 抓取分支对应的最近一条 PR；gh 未装 / 未登录 / 超时 / 解析失败统一返回 undefined
+async function detectPullRequest(cwd: string, branch?: string): Promise<PullRequestSummary | undefined> {
+  if (!branch) {
+    return undefined;
+  }
+  try {
+    const { stdout } = await execFileAsync(
+      "gh",
+      [
+        "pr",
+        "list",
+        "--head",
+        branch,
+        "--state",
+        "all",
+        "--json",
+        "number,state,isDraft,title,url",
+        "--limit",
+        "1"
+      ],
+      { cwd, timeout: 5000, windowsHide: true }
+    );
+    const items = JSON.parse(stdout) as Array<{
+      number: number;
+      state: string;
+      isDraft: boolean;
+      title?: string;
+      url?: string;
+    }>;
+    const raw = items[0];
+    if (!raw) {
+      return undefined;
+    }
+    const state: PullRequestState =
+      raw.state === "MERGED"
+        ? "merged"
+        : raw.state === "CLOSED"
+          ? "closed"
+          : raw.isDraft
+            ? "draft"
+            : "open";
+    return {
+      number: raw.number,
+      state,
+      title: raw.title,
+      url: raw.url
+    };
   } catch {
     return undefined;
   }

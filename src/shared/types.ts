@@ -87,6 +87,17 @@ export type WorkspaceInspection = {
   cwd: string;
   branch?: string;
   ports: number[];
+  pullRequest?: PullRequestSummary;
+};
+
+// PR 状态：open/draft/merged/closed —— 来源 gh CLI，缺失时 undefined
+export type PullRequestState = "open" | "draft" | "merged" | "closed";
+
+export type PullRequestSummary = {
+  number: number;
+  state: PullRequestState;
+  title?: string;
+  url?: string;
 };
 
 export type SocketRpcMethod =
@@ -494,6 +505,10 @@ export type Workspace = {
   status: WorkspaceStatus;
   notice?: string;
   recentEvents?: WorkspaceStatusEvent[];
+  pullRequest?: PullRequestSummary;
+  // ISO 时间戳：用户最近一次将该 workspace 切为 active 的时刻
+  // unread 计数 = recentEvents 中 at > lastViewedAt 的条目数
+  lastViewedAt?: string;
   layout: LayoutNode;
   panes: Record<string, Pane>;
   surfaces: Record<string, Surface>;
