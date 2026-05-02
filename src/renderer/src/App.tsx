@@ -95,6 +95,7 @@ import type {
   WorkspaceSummary,
   TerminalNotificationPayload
 } from "@shared/types";
+import { getWorkspaceUnreadCount } from "./lib/workspaceUnread";
 import { TerminalSurface, setTerminalSearchHandlers } from "./components/TerminalSurface";
 
 let nextSurfaceNumber = 1;
@@ -474,17 +475,7 @@ function withWorkspaceStatusEvent(workspace: Workspace, input: WorkspaceStatusEv
 
 // 未读数 = recentEvents 中事件时间晚于 lastViewedAt 的条目数；缺 lastViewedAt 视为全部未读
 // 注意：recentEvents 上限 maxWorkspaceStatusEvents（4），未读 badge 因此实际范围 0..4
-function getWorkspaceUnreadCount(workspace: Workspace): number {
-  const events = workspace.recentEvents ?? [];
-  if (events.length === 0) {
-    return 0;
-  }
-  const lastViewedAt = workspace.lastViewedAt;
-  if (!lastViewedAt) {
-    return events.length;
-  }
-  return events.filter((event) => event.at > lastViewedAt).length;
-}
+// 实现已抽取到 src/renderer/src/lib/workspaceUnread.ts 以便单元测试
 
 function detectTerminalAttentionPrompt(output: string): TerminalAttentionPrompt | undefined {
   const normalizedOutput = output.replace(terminalControlSequencePattern, "").replace(/\r/g, "\n").toLowerCase();

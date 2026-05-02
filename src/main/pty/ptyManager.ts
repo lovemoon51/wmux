@@ -3,7 +3,9 @@ import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn, type IPty } from "node-pty";
-import type { ShellProfile, ShellProfileOption, TerminalNotificationPayload } from "../../shared/types";
+import type { ShellProfile, ShellProfileOption } from "../../shared/types";
+import { extractOscNotifications } from "./oscNotifications";
+import { appendToOutputBuffer } from "./outputBuffer";
 
 type TerminalSession = {
   id: string;
@@ -16,69 +18,7 @@ const pendingInputs = new Map<string, string[]>();
 const maxPendingInputItems = 20;
 
 // 终端输出环形缓冲：按 surface id 保留近期输出，attach 时回放
-// 解决 renderer 重挂载（切 surface、调整布局）后 xterm 缓冲清空的问题
 const outputBuffers = new Map<string, string>();
-const outputBufferMaxBytes = 256 * 1024;
-const outputBufferTrimBytes = 192 * 1024;
-
-function appendOutputBuffer(id: string, chunk: string): void {
-  if (!chunk) {
-    return;
-  }
-  const previous = outputBuffers.get(id) ?? "";
-  const next = previous + chunk;
-  if (next.length <= outputBufferMaxBytes) {
-    outputBuffers.set(id, next);
-    return;
-  }
-  // 超阈值：保留尾部 trim 大小，再对齐到下一个换行避免半截 ANSI 序列
-  const sliced = next.slice(-outputBufferTrimBytes);
-  const newlineIdx = sliced.indexOf("\n");
-  outputBuffers.set(id, newlineIdx >= 0 ? sliced.slice(newlineIdx + 1) : sliced);
-}
-
-// OSC 9 / 99 / 777 通知序列：ESC ] code ; payload (BEL | ESC \)
-// 仅识别这三个 code，其他 OSC（0 set-title、8 hyperlink）原样透传
-// eslint-disable-next-line no-control-regex
-const oscNotificationPattern = /\x1b\](9|99|777);([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
-
-function parseOscPayload(code: 9 | 99 | 777, payload: string): { title: string; body: string } {
-  if (code === 777) {
-    // OSC 777：notify;title;body
-    const parts = payload.split(";");
-    if (parts[0] === "notify" && parts.length >= 2) {
-      return {
-        title: parts[1] || "终端通知",
-        body: parts.slice(2).join(";")
-      };
-    }
-    return { title: "终端通知", body: payload };
-  }
-  if (code === 99) {
-    // OSC 99：可能含 id=N; 前缀
-    const semicolonIdx = payload.indexOf(";");
-    if (semicolonIdx > 0 && payload.slice(0, semicolonIdx).startsWith("id=")) {
-      return { title: "终端通知", body: payload.slice(semicolonIdx + 1) };
-    }
-    return { title: "终端通知", body: payload };
-  }
-  // OSC 9：单字段消息
-  return { title: "终端通知", body: payload };
-}
-
-function extractOscNotifications(
-  surfaceId: string,
-  data: string
-): { cleaned: string; notifications: TerminalNotificationPayload[] } {
-  const notifications: TerminalNotificationPayload[] = [];
-  const cleaned = data.replace(oscNotificationPattern, (_match, codeStr: string, payload: string) => {
-    const code = Number(codeStr) as 9 | 99 | 777;
-    const { title, body } = parseOscPayload(code, payload);
-    notifications.push({ surfaceId, code, title, body });
-    return "";
-  });
-  return { cleaned, notifications };
-}
 
 const windowsShellPaths = {
   pwsh: "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
@@ -234,13 +174,13 @@ export function registerPtyIpc(): void {
           // 缓冲 OSC 之外的输出，等待下一次 attach 回放
           const { cleaned } = extractOscNotifications(payload.id, data);
           if (cleaned) {
-            appendOutputBuffer(payload.id, cleaned);
+            appendToOutputBuffer(outputBuffers, payload.id, cleaned);
           }
           return;
         }
         const { cleaned, notifications } = extractOscNotifications(payload.id, data);
         if (cleaned) {
-          appendOutputBuffer(payload.id, cleaned);
+          appendToOutputBuffer(outputBuffers, payload.id, cleaned);
           sender.send("terminal:data", { id: payload.id, data: cleaned });
         }
         for (const notification of notifications) {

@@ -14,6 +14,8 @@
     "preview": "electron-vite preview",
     "type-check": "tsc --noEmit",
     "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "smoke:terminal": "node scripts/smoke-electron-terminal.mjs",
     "smoke:browser": "node scripts/smoke-browser-automation.mjs"
   },
@@ -46,7 +48,8 @@
     "eslint-plugin-react-hooks": "^5.1.0",
     "playwright": "^1.59.1",
     "typescript": "^5.7.3",
-    "vite": "^6.0.11"
+    "vite": "^6.0.11",
+    "vitest": "^4.1.5"
   },
   "build": {
     "appId": "dev.wmux.app",
