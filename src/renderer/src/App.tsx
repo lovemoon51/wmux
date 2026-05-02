@@ -4030,6 +4030,7 @@ export function App(): ReactElement {
         onClose={handleCloseWorkspace}
         onClearStatus={clearWorkspaceStatus}
         onOpenCommandPalette={openCommandPalette}
+        onOpenPullRequest={handleOpenTerminalUrl}
         settingsOpen={settingsOpen}
         notificationsOpen={notificationsOpen}
         securityModeDraft={securityModeDraft}
@@ -4457,6 +4458,7 @@ function WorkspaceSidebar({
   onClose,
   onClearStatus,
   onOpenCommandPalette,
+  onOpenPullRequest,
   settingsOpen,
   notificationsOpen,
   securityModeDraft,
@@ -4479,6 +4481,7 @@ function WorkspaceSidebar({
   onClose: (id: string) => void;
   onClearStatus: (id: string) => void;
   onOpenCommandPalette: () => void;
+  onOpenPullRequest: (url: string) => void;
   settingsOpen: boolean;
   notificationsOpen: boolean;
   securityModeDraft: SocketSecurityMode;
@@ -4570,8 +4573,28 @@ function WorkspaceSidebar({
                       )}
                       {pullRequest && (
                         <span
-                          className={`metaPill metaPillPr metaPillPr-${pullRequest.state}`}
+                          className={`metaPill metaPillPr metaPillPr-${pullRequest.state}${
+                            pullRequest.url ? " metaPillPrInteractive" : ""
+                          }`}
                           title={pullRequest.title ?? `PR #${pullRequest.number}`}
+                          {...(pullRequest.url
+                            ? {
+                                role: "link",
+                                tabIndex: 0,
+                                onClick: (event: ReactMouseEvent) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  onOpenPullRequest(pullRequest.url!);
+                                },
+                                onKeyDown: (event: ReactKeyboardEvent) => {
+                                  if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    onOpenPullRequest(pullRequest.url!);
+                                  }
+                                }
+                              }
+                            : {})}
                         >
                           <GitPullRequest size={12} />
                           {`#${pullRequest.number} ${pullRequest.state}`}
@@ -4624,8 +4647,28 @@ function WorkspaceSidebar({
                     )}
                     {pullRequest && (
                       <span
-                        className={`metaPill metaPillPr metaPillPr-${pullRequest.state}`}
+                        className={`metaPill metaPillPr metaPillPr-${pullRequest.state}${
+                          pullRequest.url ? " metaPillPrInteractive" : ""
+                        }`}
                         title={pullRequest.title ?? `PR #${pullRequest.number}`}
+                        {...(pullRequest.url
+                          ? {
+                              role: "link",
+                              tabIndex: 0,
+                              onClick: (event: ReactMouseEvent) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                onOpenPullRequest(pullRequest.url!);
+                              },
+                              onKeyDown: (event: ReactKeyboardEvent) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  onOpenPullRequest(pullRequest.url!);
+                                }
+                              }
+                            }
+                          : {})}
                       >
                         <GitPullRequest size={12} />
                         {`#${pullRequest.number} ${pullRequest.state}`}

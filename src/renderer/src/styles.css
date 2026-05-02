@@ -353,6 +353,21 @@ kbd {
   border-color: currentColor;
 }
 
+/* 可交互态：有 url 时整体作为 link 风格元素 */
+.metaPillPrInteractive {
+  cursor: pointer;
+  outline: 0;
+  user-select: none;
+}
+
+.metaPillPrInteractive:hover {
+  filter: brightness(1.25);
+}
+
+.metaPillPrInteractive:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
 .metaPillPr-open {
   color: var(--accent);
 }
