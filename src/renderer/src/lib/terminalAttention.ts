@@ -15,8 +15,8 @@ export type TerminalAttentionPrompt = {
   message: string;
 };
 
-// eslint 默认未启用 no-control-regex；此处直接写 \x1b
 const terminalControlSequencePattern =
+  // eslint-disable-next-line no-control-regex
   /\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))/g;
 
 const terminalAttentionPrompts: TerminalAttentionPrompt[] = [

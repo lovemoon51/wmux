@@ -49,6 +49,8 @@ wmux ping
 wmux identify --json
 wmux capabilities --json
 wmux config --json
+wmux palette open
+wmux palette run --query "new terminal"
 ```
 
 ### 工作区
@@ -96,9 +98,19 @@ wmux paste
 wmux notify --title "Build complete" --body "All checks passed"
 wmux status set --status running --notice "npm test"
 wmux status list
-wmux status history
+wmux status history --limit 5
 wmux status list --json
 wmux clear-status
+```
+
+`status history` 人类输出按 `time / workspace / status / message` 展示最近事件；`--json` 仍返回 `WorkspaceSummary.recentEvents`，`--limit` 可限制每个 workspace 的事件数量。
+
+### 命令块
+
+```bash
+wmux block list --limit 50
+wmux block get --block <blockId>
+wmux block rerun --block <blockId>
 ```
 
 ### 浏览器
@@ -130,6 +142,8 @@ wmux browser storage set --key wmux_local --value updated --surface surface:3
 | `system.identify` | `{}` | active ids |
 | `system.capabilities` | `{}` | method list |
 | `config.list` | `{}` | config sources and commands |
+| `palette.open` | `{ query? }` | opened flag |
+| `palette.run` | `{ id?, query? }` | selected palette command |
 | `workspace.list` | `{ active? }` | workspace list |
 | `workspace.create` | `{ name?, cwd? }` | workspace |
 | `workspace.select` | `{ workspaceId }` | selected workspace |
@@ -145,7 +159,10 @@ wmux browser storage set --key wmux_local --value updated --surface surface:3
 | `status.notify` | `{ workspaceId?, title, body? }` | notice |
 | `status.set` | `{ workspaceId?, status, notice? }` | workspace status |
 | `status.clear` | `{ workspaceId? }` | ok |
-| `status.list` | `{ workspaceId? }` | workspace status list |
+| `status.list` | `{ workspaceId?, limit? }` | workspace status list and recent events |
+| `block.list` | `{ surfaceId?, limit? }` | recent command blocks |
+| `block.get` | `{ blockId }` | block metadata |
+| `block.rerun` | `{ blockId }` | writes command into terminal input |
 | `browser.navigate` | `{ surfaceId, url }` | ok |
 | `browser.snapshot` | `{ surfaceId, selector?, compact? }` | snapshot |
 | `browser.screenshot` | `{ surfaceId, path? }` | path/base64 |

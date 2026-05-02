@@ -27,9 +27,11 @@ export default [
         clearTimeout: "readonly",
         console: "readonly",
         document: "readonly",
+        Event: "readonly",
         getComputedStyle: "readonly",
         process: "readonly",
         setTimeout: "readonly",
+        window: "readonly",
         URL: "readonly"
       }
     }

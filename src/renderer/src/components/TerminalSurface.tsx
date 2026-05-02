@@ -5,8 +5,9 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { Activity, Code2, Minus, Plus } from "lucide-react";
-import { useEffect, useRef, useState, type ReactElement } from "react";
-import type { ShellProfile, Surface, WorkspaceStatus } from "@shared/types";
+import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
+import type { Block, BlockEvent, ShellProfile, Surface, WorkspaceStatus } from "@shared/types";
+import { BlockOverlay } from "./BlockOverlay";
 import "@xterm/xterm/css/xterm.css";
 
 // 终端字体栈：优先 Nerd Font 与等宽字体，最终退回 monospace
@@ -55,12 +56,14 @@ const defaultTerminalFontSize = 13;
 
 export function TerminalSurface({
   surface,
+  workspaceId,
   cwd,
   shell,
   onOpenUrl,
   onOutput
 }: {
   surface: Surface;
+  workspaceId: string;
   cwd: string;
   shell: ShellProfile;
   onOpenUrl?: (url: string) => void;
@@ -74,6 +77,11 @@ export function TerminalSurface({
   const lastSelectionRef = useRef("");
   const sessionId = `${surface.id}:${shell}`;
   const [fontSize, setFontSize] = useState(defaultTerminalFontSize);
+  const [blocks, setBlocks] = useState<Block[]>([]);
+  const [focusedBlockId, setFocusedBlockId] = useState<string | undefined>();
+  const [viewportY, setViewportY] = useState(0);
+  const blocksRef = useRef<Block[]>([]);
+  const focusedBlockIdRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     onOpenUrlRef.current = onOpenUrl;
@@ -82,6 +90,56 @@ export function TerminalSurface({
   useEffect(() => {
     onOutputRef.current = onOutput;
   }, [onOutput]);
+
+  useEffect(() => {
+    blocksRef.current = blocks;
+  }, [blocks]);
+
+  useEffect(() => {
+    focusedBlockIdRef.current = focusedBlockId;
+  }, [focusedBlockId]);
+
+  const focusBlock = useCallback((blockId: string): void => {
+    setFocusedBlockId(blockId);
+    const terminal = terminalRef.current;
+    const block = blocksRef.current.find((item) => item.id === blockId);
+    if (!terminal || !block) {
+      return;
+    }
+    const currentViewport = terminal.buffer.active.viewportY;
+    terminal.scrollLines(block.startLine - currentViewport);
+    setViewportY(terminal.buffer.active.viewportY);
+  }, []);
+
+  const focusBlockByOffset = useCallback((offset: number): void => {
+    const currentBlocks = blocksRef.current;
+    if (currentBlocks.length === 0) {
+      return;
+    }
+    const currentIndex = Math.max(
+      0,
+      currentBlocks.findIndex((block) => block.id === focusedBlockIdRef.current)
+    );
+    const nextIndex = Math.max(0, Math.min(currentBlocks.length - 1, currentIndex + offset));
+    focusBlock(currentBlocks[nextIndex].id);
+  }, [focusBlock]);
+
+  const copyBlock = useCallback((block: Block, mode: "command" | "all"): void => {
+    const commandText = block.command.trim();
+    if (!commandText) {
+      return;
+    }
+    const text = mode === "command" ? commandText : `$ ${commandText}`;
+    window.wmux?.clipboard.writeText(text);
+  }, []);
+
+  const rerunBlock = useCallback((block: Block): void => {
+    const commandText = block.command.trim();
+    if (!commandText) {
+      return;
+    }
+    window.wmux?.terminal.input({ id: sessionId, data: commandText });
+  }, [sessionId]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -147,6 +205,28 @@ export function TerminalSurface({
         return true;
       }
       const isPrimary = event.ctrlKey || event.metaKey;
+      if (isPrimary && !event.altKey && !event.shiftKey && event.key === "ArrowUp") {
+        focusBlockByOffset(-1);
+        return false;
+      }
+      if (isPrimary && !event.altKey && !event.shiftKey && event.key === "ArrowDown") {
+        focusBlockByOffset(1);
+        return false;
+      }
+      if (isPrimary && event.shiftKey && !event.altKey && event.key.toLowerCase() === "c") {
+        const block = blocksRef.current.find((item) => item.id === focusedBlockIdRef.current);
+        if (block) {
+          copyBlock(block, "all");
+          return false;
+        }
+      }
+      if (isPrimary && event.shiftKey && !event.altKey && event.key.toLowerCase() === "r") {
+        const block = blocksRef.current.find((item) => item.id === focusedBlockIdRef.current);
+        if (block) {
+          rerunBlock(block);
+          return false;
+        }
+      }
       if (isPrimary && !event.altKey && event.key.toLowerCase() === "f") {
         terminalSearchHandlers.onRequestFind?.(surface.id);
         return false;
@@ -199,6 +279,7 @@ export function TerminalSurface({
     const fitAndResize = (): void => {
       try {
         fitAddon.fit();
+        setViewportY(terminal.buffer.active.viewportY);
         window.wmux?.terminal.resize({
           id: sessionId,
           cols: terminal.cols,
@@ -237,15 +318,100 @@ export function TerminalSurface({
     };
     host.addEventListener("wheel", handleWheel, { passive: false });
 
-    const selectionChangeDisposable = terminal.onSelectionChange(() => {
-      const selection = terminal.getSelection();
+    const storeSelection = (selection: string): string => {
       if (selection.trim()) {
         lastSelectionRef.current = selection;
       }
+      return selection;
+    };
+
+    const rememberTerminalSelection = (): string => {
+      const selection = terminal.getSelection() || window.getSelection()?.toString() || "";
+      return storeSelection(selection);
+    };
+
+    let dragSelectionStart: { x: number; y: number } | null = null;
+
+    const readDragSelection = (start: { x: number; y: number }, end: { x: number; y: number }): string => {
+      const rows = Array.from(host.querySelectorAll<HTMLElement>(".xterm-rows > div"));
+      const rowAt = (y: number): number =>
+        rows.findIndex((row) => {
+          const rect = row.getBoundingClientRect();
+          return y >= rect.top && y <= rect.bottom;
+        });
+      const startRowIndex = rowAt(start.y);
+      const endRowIndex = rowAt(end.y);
+      if (startRowIndex < 0 || endRowIndex < 0) {
+        return "";
+      }
+
+      const columnAt = (row: HTMLElement, x: number, mode: "start" | "end"): number => {
+        const text = row.textContent ?? "";
+        const rect = row.getBoundingClientRect();
+        const screenWidth = terminal.element?.querySelector<HTMLElement>(".xterm-screen")?.getBoundingClientRect().width;
+        const characterWidth = (screenWidth || rect.width) / Math.max(1, terminal.cols);
+        const rawColumn = (x - rect.left) / Math.max(1, characterWidth);
+        const column = mode === "start" ? Math.floor(rawColumn) : Math.ceil(rawColumn);
+        return Math.max(0, Math.min(text.length, column));
+      };
+
+      if (startRowIndex === endRowIndex) {
+        const row = rows[startRowIndex];
+        const text = row.textContent ?? "";
+        const startColumn = columnAt(row, start.x, "start");
+        const endColumn = columnAt(row, end.x, "end");
+        return text.slice(Math.min(startColumn, endColumn), Math.max(startColumn, endColumn));
+      }
+
+      const firstRowIndex = Math.min(startRowIndex, endRowIndex);
+      const lastRowIndex = Math.max(startRowIndex, endRowIndex);
+      return rows
+        .slice(firstRowIndex, lastRowIndex + 1)
+        .map((row, index, selectedRows) => {
+          const text = row.textContent ?? "";
+          if (index === 0) {
+            return text.slice(columnAt(row, firstRowIndex === startRowIndex ? start.x : end.x, "start"));
+          }
+          if (index === selectedRows.length - 1) {
+            return text.slice(0, columnAt(row, lastRowIndex === endRowIndex ? end.x : start.x, "end"));
+          }
+          return text;
+        })
+        .join("\n");
+    };
+
+    const selectionChangeDisposable = terminal.onSelectionChange(() => {
+      rememberTerminalSelection();
     });
 
+    const captureSelectionDragStart = (event: MouseEvent): void => {
+      if (event.button === 0) {
+        dragSelectionStart = { x: event.clientX, y: event.clientY };
+      }
+    };
+    host.addEventListener("mousedown", captureSelectionDragStart);
+
+    const captureSelectionAfterMouseUp = (event: MouseEvent): void => {
+      const dragStart = dragSelectionStart;
+      dragSelectionStart = null;
+      const dragEnd = { x: event.clientX, y: event.clientY };
+      const selection = rememberTerminalSelection();
+      const distance = dragStart ? Math.hypot(dragEnd.x - dragStart.x, dragEnd.y - dragStart.y) : 0;
+      if (!selection.trim() && dragStart && distance > 4) {
+        storeSelection(readDragSelection(dragStart, dragEnd));
+      }
+    };
+    host.addEventListener("mouseup", captureSelectionAfterMouseUp);
+
+    const captureSelectionBeforeContextMenu = (event: MouseEvent): void => {
+      if (event.button === 2) {
+        rememberTerminalSelection();
+      }
+    };
+    host.addEventListener("mousedown", captureSelectionBeforeContextMenu, { capture: true });
+
     const handleTerminalContextMenu = (event: MouseEvent): void => {
-      const activeSelection = terminal.getSelection() || window.getSelection()?.toString() || "";
+      const activeSelection = rememberTerminalSelection();
       const selectionToCopy = activeSelection.trim() ? activeSelection : lastSelectionRef.current;
 
       event.preventDefault();
@@ -309,6 +475,10 @@ export function TerminalSurface({
     const resizeObserver = new ResizeObserver(() => fitAndResize());
     resizeObserver.observe(host);
 
+    const scrollDisposable = terminal.onScroll((nextViewportY) => {
+      setViewportY(nextViewportY);
+    });
+
     const inputDisposable = terminal.onData((data) => {
       window.wmux?.terminal.input({ id: sessionId, data });
     });
@@ -342,6 +512,7 @@ export function TerminalSurface({
     const removeDataListener = window.wmux?.terminal.onData(({ id, data }) => {
       if (id === sessionId) {
         terminal.write(data);
+        setViewportY(terminal.buffer.active.viewportY);
         onOutputRef.current?.(surface.id, data);
       }
     });
@@ -357,6 +528,8 @@ export function TerminalSurface({
       fitAndResize();
       void window.wmux?.terminal.create({
         id: sessionId,
+        surfaceId: surface.id,
+        workspaceId,
         cwd,
         shell,
         cols: terminal.cols,
@@ -367,10 +540,14 @@ export function TerminalSurface({
     return () => {
       resizeObserver.disconnect();
       host.removeEventListener("mousedown", focusTerminal);
+      host.removeEventListener("mousedown", captureSelectionDragStart);
+      host.removeEventListener("mousedown", captureSelectionBeforeContextMenu, { capture: true });
+      host.removeEventListener("mouseup", captureSelectionAfterMouseUp);
       host.removeEventListener("wheel", handleWheel);
       host.removeEventListener("contextmenu", handleTerminalContextMenu, { capture: true });
       document.removeEventListener("click", handleTerminalClick, true);
       inputDisposable.dispose();
+      scrollDisposable.dispose();
       selectionChangeDisposable.dispose();
       linkProviderDisposable.dispose();
       releaseSearch?.();
@@ -388,7 +565,57 @@ export function TerminalSurface({
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [cwd, sessionId, shell]);
+  }, [copyBlock, cwd, focusBlockByOffset, fontSize, rerunBlock, sessionId, shell, surface.id, workspaceId]);
+
+  useEffect(() => {
+    setBlocks([]);
+    blocksRef.current = [];
+    setFocusedBlockId(undefined);
+    focusedBlockIdRef.current = undefined;
+    const removeBlockListener = window.wmux?.terminal.onBlock?.((event: BlockEvent) => {
+      if (event.surfaceId !== surface.id) {
+        return;
+      }
+      setBlocks((currentBlocks) => {
+        if (event.type === "block:list") {
+          return event.blocks.map((block) => ({ ...block }));
+        }
+        if (event.type === "block:start") {
+          return [...currentBlocks.filter((block) => block.id !== event.block.id), { ...event.block }];
+        }
+        if (event.type === "block:command") {
+          return currentBlocks.map((block) =>
+            block.id === event.blockId ? { ...block, command: event.command } : block
+          );
+        }
+        if (event.type === "block:output") {
+          return currentBlocks;
+        }
+        if (event.type === "block:end") {
+          const terminal = terminalRef.current;
+          const endLine = terminal ? terminal.buffer.active.baseY + terminal.buffer.active.cursorY : undefined;
+          return currentBlocks.map((block) =>
+            block.id === event.blockId
+              ? {
+                  ...block,
+                  endedAt: event.endedAt,
+                  exitCode: event.exitCode,
+                  status: event.exitCode === 0 ? "success" : "error",
+                  durationMs: Math.max(0, Date.parse(event.endedAt) - Date.parse(block.startedAt)),
+                  endLine
+                }
+              : block
+          );
+        }
+        return currentBlocks;
+      });
+      if (event.type === "block:start") {
+        setFocusedBlockId(event.block.id);
+      }
+    });
+
+    return () => removeBlockListener?.();
+  }, [surface.id]);
 
   const adjustFontSize = (delta: number): void => {
     setFontSize((currentFontSize) => {
@@ -446,7 +673,18 @@ export function TerminalSurface({
           </button>
         </span>
       </div>
-      <div className="terminalHost" ref={hostRef} />
+      <div className="terminalHostWrap">
+        <div className="terminalHost" ref={hostRef} />
+        <BlockOverlay
+          blocks={blocks}
+          focusedBlockId={focusedBlockId}
+          terminalHost={hostRef.current}
+          viewportY={viewportY}
+          onFocusBlock={focusBlock}
+          onCopyBlock={copyBlock}
+          onRerunBlock={rerunBlock}
+        />
+      </div>
     </div>
   );
 }

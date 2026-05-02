@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  deserializePersistedBlocks,
   deserializeOutputBuffers,
   persistedScrollbackFileVersion,
   persistedScrollbackMaxPerEntry,
@@ -11,7 +12,8 @@ describe("serializeOutputBuffers", () => {
     const json = serializeOutputBuffers(new Map());
     expect(JSON.parse(json)).toEqual({
       version: persistedScrollbackFileVersion,
-      entries: {}
+      entries: {},
+      blocks: {}
     });
   });
 
@@ -106,5 +108,39 @@ describe("deserializeOutputBuffers", () => {
     const json = serializeOutputBuffers(original);
     const restored = deserializeOutputBuffers(json);
     expect(restored).toEqual(original);
+  });
+
+  it("兼容 v1 scrollback payload", () => {
+    const raw = JSON.stringify({ version: 1, entries: { a: "legacy" } });
+    expect(deserializeOutputBuffers(raw)).toEqual(new Map([["a", "legacy"]]));
+  });
+});
+
+describe("deserializePersistedBlocks", () => {
+  it("从 v2 payload 恢复 block 元数据", () => {
+    const json = serializeOutputBuffers(new Map(), {
+      blocks: new Map([
+        [
+          "session-1",
+          [
+            {
+              id: "block-1",
+              surfaceId: "surface-1",
+              workspaceId: "workspace-1",
+              startLine: 1,
+              command: "npm test",
+              startedAt: "2026-05-03T00:00:00.000Z",
+              status: "success"
+            }
+          ]
+        ]
+      ])
+    });
+
+    expect(deserializePersistedBlocks(json).get("session-1")?.[0]?.command).toBe("npm test");
+  });
+
+  it("v1 payload 没有 blocks 时返回空 Map", () => {
+    expect(deserializePersistedBlocks(JSON.stringify({ version: 1, entries: { a: "x" } }))).toEqual(new Map());
   });
 });

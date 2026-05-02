@@ -7,8 +7,9 @@ import { dirname, join, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { registerPtyIpc } from "./pty/ptyManager";
-import { hydrateOutputBuffersFromState, snapshotOutputBuffers } from "./pty/ptyManager";
+import { hydrateBlocksFromState, hydrateOutputBuffersFromState, snapshotBlocks, snapshotOutputBuffers } from "./pty/ptyManager";
 import {
+  deserializePersistedBlocks,
   deserializeOutputBuffers,
   serializeOutputBuffers
 } from "./pty/outputBufferPersistence";
@@ -78,8 +79,12 @@ async function hydrateScrollbackFromDisk(): Promise<void> {
   try {
     const raw = await readFile(getScrollbackPath(), "utf8");
     const state = deserializeOutputBuffers(raw);
+    const blocks = deserializePersistedBlocks(raw);
     if (state.size > 0) {
       hydrateOutputBuffersFromState(state);
+    }
+    if (blocks.size > 0) {
+      hydrateBlocksFromState(blocks);
     }
   } catch {
     // 缺文件 / JSON 损坏 / 权限问题：deserialize 已经做兜底返回空 Map，
@@ -89,7 +94,9 @@ async function hydrateScrollbackFromDisk(): Promise<void> {
 
 function persistScrollbackToDisk(): void {
   try {
-    const json = serializeOutputBuffers(snapshotOutputBuffers());
+    const json = serializeOutputBuffers(snapshotOutputBuffers(), {
+      blocks: snapshotBlocks()
+    });
     // 同步写：before-quit 退出窗口很短，异步写很可能赶不上 process exit
     writeFileSync(getScrollbackPath(), json, { encoding: "utf8" });
   } catch {

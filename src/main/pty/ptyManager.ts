@@ -3,14 +3,20 @@ import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn, type IPty } from "node-pty";
-import type { ShellProfile, ShellProfileOption } from "../../shared/types";
+import type { Block, BlockEvent, ShellProfile, ShellProfileOption } from "../../shared/types";
+import { createBlockParserState, parseTerminalBlocks, type BlockParserState } from "./blockParser";
 import { extractOscNotifications } from "./oscNotifications";
 import { appendToOutputBuffer } from "./outputBuffer";
 
 type TerminalSession = {
   id: string;
+  surfaceId: string;
+  workspaceId?: string;
+  shell: ShellProfile;
+  cwd: string;
   pty: IPty;
   owner: WebContents;
+  blockParser: BlockParserState;
 };
 
 const sessions = new Map<string, TerminalSession>();
@@ -19,6 +25,8 @@ const maxPendingInputItems = 20;
 
 // 终端输出环形缓冲：按 surface id 保留近期输出，attach 时回放
 const outputBuffers = new Map<string, string>();
+const blockBuffers = new Map<string, Block[]>();
+const maxBlocksPerSession = 500;
 
 const windowsShellPaths = {
   pwsh: "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
@@ -125,11 +133,24 @@ export function registerPtyIpc(): void {
 
   ipcMain.handle(
     "terminal:create",
-    (event, payload: { id: string; cwd?: string; cols?: number; rows?: number; shell?: ShellProfile }) => {
+    (
+      event,
+      payload: {
+        id: string;
+        surfaceId?: string;
+        workspaceId?: string;
+        cwd?: string;
+        cols?: number;
+        rows?: number;
+        shell?: ShellProfile;
+      }
+    ) => {
       const existing = sessions.get(payload.id);
       if (existing) {
         // 同会话重 attach：更新 owner，回放历史输出
         existing.owner = event.sender;
+        existing.surfaceId = payload.surfaceId ?? existing.surfaceId;
+        existing.workspaceId = payload.workspaceId ?? existing.workspaceId;
         const replay = outputBuffers.get(payload.id);
         if (replay) {
           // 重置 SGR 与光标，避免半截 ANSI 序列污染渲染
@@ -138,19 +159,29 @@ export function registerPtyIpc(): void {
             data: `\x1b[0m${replay}`
           });
         }
+        const blocks = blockBuffers.get(payload.id);
+        if (blocks?.length) {
+          event.sender.send("terminal:block", {
+            type: "block:list",
+            surfaceId: existing.surfaceId,
+            blocks
+          } satisfies BlockEvent);
+        }
         return { id: payload.id };
       }
 
       const shell = getShell(payload.shell);
+      const cwd = getDefaultCwd(payload.cwd);
       const pty = spawn(shell, [], {
         name: "xterm-256color",
         cols: payload.cols ?? 80,
         rows: payload.rows ?? 24,
-        cwd: getDefaultCwd(payload.cwd),
+        cwd,
         env: {
           ...process.env,
           TERM_PROGRAM: "wmux",
-          WMUX_SURFACE_ID: payload.id
+          WMUX_SURFACE_ID: payload.surfaceId ?? getSurfaceIdFromSessionId(payload.id),
+          WMUX_SESSION_ID: payload.id
         }
       });
 
@@ -173,32 +204,57 @@ export function registerPtyIpc(): void {
 
       const session: TerminalSession = {
         id: payload.id,
+        surfaceId: payload.surfaceId ?? getSurfaceIdFromSessionId(payload.id),
+        workspaceId: payload.workspaceId,
+        shell: payload.shell ?? "auto",
+        cwd,
         pty,
-        owner: event.sender
+        owner: event.sender,
+        blockParser: createBlockParserState()
       };
 
       sessions.set(payload.id, session);
-      const pendingInputItems = pendingInputs.get(payload.id);
-      if (pendingInputItems) {
-        pendingInputs.delete(payload.id);
-        pendingInputItems.forEach((data) => pty.write(data));
+      const persistedBlocks = blockBuffers.get(payload.id);
+      if (persistedBlocks?.length && !event.sender.isDestroyed()) {
+        event.sender.send("terminal:block", {
+          type: "block:list",
+          surfaceId: session.surfaceId,
+          blocks: persistedBlocks
+        } satisfies BlockEvent);
       }
-
       pty.onData((data) => {
         // 始终读取最新 owner：re-attach 可能更换 sender
-        const sender = sessions.get(payload.id)?.owner;
+        const currentSession = sessions.get(payload.id);
+        const sender = currentSession?.owner;
+        if (!currentSession) {
+          return;
+        }
+        const parsedBlocks = parseTerminalBlocks(currentSession.blockParser, {
+          sessionId: currentSession.id,
+          surfaceId: currentSession.surfaceId,
+          workspaceId: currentSession.workspaceId,
+          shell: currentSession.shell,
+          cwd: currentSession.cwd,
+          startLine: getBufferedLineCount(outputBuffers.get(payload.id)),
+          data
+        });
         if (!sender || sender.isDestroyed()) {
           // 缓冲 OSC 之外的输出，等待下一次 attach 回放
-          const { cleaned } = extractOscNotifications(payload.id, data);
+          const { cleaned } = extractOscNotifications(currentSession.surfaceId, parsedBlocks.cleaned);
           if (cleaned) {
             appendToOutputBuffer(outputBuffers, payload.id, cleaned);
           }
+          applyBlockEvents(payload.id, parsedBlocks.events);
           return;
         }
-        const { cleaned, notifications } = extractOscNotifications(payload.id, data);
+        const { cleaned, notifications } = extractOscNotifications(currentSession.surfaceId, parsedBlocks.cleaned);
         if (cleaned) {
           appendToOutputBuffer(outputBuffers, payload.id, cleaned);
           sender.send("terminal:data", { id: payload.id, data: cleaned });
+        }
+        applyBlockEvents(payload.id, parsedBlocks.events);
+        for (const blockEvent of parsedBlocks.events) {
+          sender.send("terminal:block", blockEvent);
         }
         for (const notification of notifications) {
           sender.send("terminal:notification", notification);
@@ -217,6 +273,12 @@ export function registerPtyIpc(): void {
       event.sender.once("destroyed", () => {
         disposeTerminal(payload.id);
       });
+
+      const pendingInputItems = pendingInputs.get(payload.id);
+      if (pendingInputItems) {
+        pendingInputs.delete(payload.id);
+        pendingInputItems.forEach((data) => pty.write(data));
+      }
 
       return { id: payload.id };
     }
@@ -257,13 +319,26 @@ export function hydrateOutputBuffersFromState(state: Map<string, string>): void 
   }
 }
 
+export function hydrateBlocksFromState(state: Map<string, Block[]>): void {
+  for (const [id, blocks] of state) {
+    if (Array.isArray(blocks) && blocks.length > 0) {
+      blockBuffers.set(id, blocks.slice(-maxBlocksPerSession));
+    }
+  }
+}
+
 export function snapshotOutputBuffers(): Map<string, string> {
   return new Map(outputBuffers);
+}
+
+export function snapshotBlocks(): Map<string, Block[]> {
+  return new Map([...blockBuffers.entries()].map(([id, blocks]) => [id, blocks.slice(-maxBlocksPerSession)]));
 }
 
 function disposeTerminal(id: string): void {
   pendingInputs.delete(id);
   outputBuffers.delete(id);
+  blockBuffers.delete(id);
   const session = sessions.get(id);
   if (!session) {
     return;
@@ -275,4 +350,46 @@ function disposeTerminal(id: string): void {
   } catch {
     // The process may already be gone; disposal should stay idempotent.
   }
+}
+
+function applyBlockEvents(sessionId: string, events: BlockEvent[]): void {
+  if (!events.length) {
+    return;
+  }
+  const blocks = blockBuffers.get(sessionId) ?? [];
+  for (const event of events) {
+    if (event.type === "block:start") {
+      blocks.push(event.block);
+      continue;
+    }
+    if (event.type === "block:command") {
+      const block = blocks.find((item) => item.id === event.blockId);
+      if (block) {
+        block.command = event.command;
+      }
+      continue;
+    }
+    if (event.type === "block:end") {
+      const block = blocks.find((item) => item.id === event.blockId);
+      if (block) {
+        block.endedAt = event.endedAt;
+        block.exitCode = event.exitCode;
+        block.status = event.exitCode === 0 ? "success" : "error";
+        block.durationMs = Math.max(0, Date.parse(event.endedAt) - Date.parse(block.startedAt));
+      }
+    }
+  }
+  blockBuffers.set(sessionId, blocks.slice(-maxBlocksPerSession));
+}
+
+function getBufferedLineCount(value: string | undefined): number {
+  if (!value) {
+    return 0;
+  }
+  return value.split(/\r\n|\n|\r/).length - 1;
+}
+
+function getSurfaceIdFromSessionId(sessionId: string): string {
+  const separatorIndex = sessionId.lastIndexOf(":");
+  return separatorIndex > 0 ? sessionId.slice(0, separatorIndex) : sessionId;
 }

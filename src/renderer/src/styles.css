@@ -990,7 +990,16 @@ kbd {
   height: 20px;
 }
 
+.terminalHostWrap {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .terminalHost {
+  position: absolute;
+  inset: 0;
   overflow: auto;
   min-width: 0;
   min-height: 0;
@@ -1031,6 +1040,113 @@ kbd {
 
 .terminalHost .xterm {
   height: 100%;
+}
+
+.blockOverlay {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  pointer-events: none;
+}
+
+.blockFrame {
+  position: absolute;
+  right: 8px;
+  left: 8px;
+  border-left: 3px solid currentColor;
+  background: rgba(16, 18, 20, 0.04);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.blockFrameFocused {
+  background: rgba(61, 174, 233, 0.07);
+}
+
+.blockStatusRunning {
+  color: var(--warning);
+}
+
+.blockStatusSuccess {
+  color: var(--success);
+}
+
+.blockStatusError {
+  color: var(--danger);
+}
+
+.blockStatusAborted {
+  color: var(--text-muted);
+}
+
+.blockMetaBar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  min-width: 0;
+  height: 24px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(58, 66, 78, 0.78);
+  border-left: 0;
+  background: rgba(21, 26, 33, 0.94);
+  color: var(--text-secondary);
+  font-size: 10px;
+  padding: 0 6px;
+  pointer-events: auto;
+}
+
+.blockCommandText,
+.blockMetaText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.blockCommandText {
+  flex: 1;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.blockMetaText {
+  max-width: 148px;
+  color: var(--text-muted);
+}
+
+.blockExitBadge {
+  flex: none;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 1px 6px;
+  color: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.blockActions {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+}
+
+.blockActionButton {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.blockActionButton:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-control);
+  color: var(--text-primary);
 }
 
 .terminalHost .xterm-viewport {
@@ -1279,10 +1395,24 @@ kbd {
 .commandPaletteList {
   display: grid;
   align-content: start;
-  gap: 5px;
+  gap: 3px;
   min-height: 0;
   overflow: auto;
   padding: 8px;
+}
+
+.commandPaletteGroup {
+  display: grid;
+  gap: 5px;
+}
+
+.commandPaletteSectionHeader {
+  padding: 7px 8px 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 .commandPaletteItem {

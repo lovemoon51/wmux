@@ -66,7 +66,7 @@ wmux send-key-surface --surface <surfaceId> enter
 wmux new-split --direction vertical
 wmux status set --status running --notice "npm test"
 wmux status list
-wmux status history
+wmux status history --limit 5
 wmux clear-status
 ```
 
@@ -82,4 +82,24 @@ wmux terminal 中出现的 `http://` / `https://` 链接可以点击打开到当
 ## Terminal Clipboard
 
 在 terminal surface 中可以直接拖选文本。右键有选区时复制选中内容；右键无选区时把系统剪贴板内容粘贴到终端输入。
+
+## Terminal Blocks
+
+wmux 的命令块使用 OSC 133 shell integration。需要在 shell 配置中按需启用：
+
+```bash
+# bash
+source /path/to/wmux/scripts/shell-integration/wmux.bash
+
+# zsh
+source /path/to/wmux/scripts/shell-integration/wmux.zsh
+```
+
+PowerShell：
+
+```powershell
+. D:\IdeaProject\codex\wmux\scripts\shell-integration\wmux.ps1
+```
+
+未启用时终端仍按普通 xterm 模式工作，只是不显示命令块。
 

@@ -1,5 +1,6 @@
 import {
   Bell,
+  Activity,
   ChevronLeft,
   ChevronRight,
   Command,
@@ -71,6 +72,14 @@ import type {
   SocketRpcResponse,
   SocketSecurityMode,
   SocketSecuritySettings,
+  Block,
+  BlockEvent,
+  BlockGetParams,
+  BlockListParams,
+  BlockRerunParams,
+  PaletteCommand,
+  PaletteOpenParams,
+  PaletteRunParams,
   StatusListParams,
   StatusSetParams,
   Surface,
@@ -91,9 +100,15 @@ import type {
   WorkspaceListParams,
   WorkspaceRenameParams,
   WorkspaceSelectParams,
+  WorkspaceStatus,
   WorkspaceSummary,
   TerminalNotificationPayload
 } from "@shared/types";
+import {
+  rankPaletteCommands,
+  recordRecentCommandUsage,
+  type PaletteRecentUsageStore
+} from "./lib/commandRegistry";
 import { getWorkspaceUnreadCount } from "./lib/workspaceUnread";
 import { detectTerminalAttentionPrompt } from "./lib/terminalAttention";
 import {
@@ -180,6 +195,11 @@ type BrowserSurfaceTarget = {
 type WorkspaceCommandBuildResult = {
   workspace: Workspace;
   terminalCommands: PendingTerminalCommand[];
+};
+
+type BlockSnapshot = Block & {
+  surfaceName?: string;
+  workspaceName?: string;
 };
 
 const browserSessions = new Map<string, BrowserSessionState>();
@@ -730,26 +750,17 @@ function createWorkspaceFromCommand(command: WmuxCommandConfig): WorkspaceComman
   };
 }
 
-function commandMatchesQuery(command: WmuxCommandConfig, query: string): boolean {
-  const normalizedQuery = query.trim().toLowerCase();
-  if (!normalizedQuery) {
-    return true;
-  }
-
-  const haystack = [command.name, command.description, command.command, ...(command.keywords ?? [])]
-    .filter((value): value is string => Boolean(value))
-    .join(" ")
-    .toLowerCase();
-  return haystack.includes(normalizedQuery);
-}
-
-function getCommandTypeLabel(command: WmuxCommandConfig): string {
-  const sourcePrefix = command.source === "global" ? "Global " : command.source === "project" ? "Project " : "";
-  if (command.workspace) {
-    return `${sourcePrefix}Workspace`;
-  }
-
-  return `${sourcePrefix}Terminal`;
+function getPaletteCategoryLabel(category: PaletteCommand["category"]): string {
+  const labels: Record<PaletteCommand["category"], string> = {
+    workspace: "Workspaces",
+    surface: "Surfaces",
+    project: "Project Commands",
+    workflow: "Workflows",
+    block: "Blocks",
+    ai: "AI Suggestions",
+    settings: "Settings"
+  };
+  return labels[category];
 }
 
 function createSocketSuccessResponse(id: string, result: unknown): SocketRpcResponse {
@@ -835,6 +846,8 @@ const socketCapabilities: SocketRpcMethod[] = [
   "system.identify",
   "system.capabilities",
   "config.list",
+  "palette.open",
+  "palette.run",
   "workspace.list",
   "workspace.create",
   "workspace.select",
@@ -851,6 +864,9 @@ const socketCapabilities: SocketRpcMethod[] = [
   "status.set",
   "status.clear",
   "status.list",
+  "block.list",
+  "block.get",
+  "block.rerun",
   "browser.navigate",
   "browser.click",
   "browser.fill",
@@ -2037,6 +2053,7 @@ export function App(): ReactElement {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+  const [paletteRecentUsage, setPaletteRecentUsage] = useState<PaletteRecentUsageStore>({});
   const [pendingTerminalCommands, setPendingTerminalCommands] = useState<PendingTerminalCommand[]>([]);
   const [trustedCommandConfigPaths, setTrustedCommandConfigPaths] = useState<string[]>([]);
   const [pendingCommandConfirmation, setPendingCommandConfirmation] =
@@ -2054,6 +2071,9 @@ export function App(): ReactElement {
   const [findResultCount, setFindResultCount] = useState(0);
   const terminalOutputBuffersRef = useRef(new Map<string, string>());
   const terminalSearchAddonsRef = useRef(new Map<string, SearchAddon>());
+  const blockSnapshotsRef = useRef(new Map<string, BlockSnapshot>());
+  const paletteCommandsRef = useRef<PaletteCommand[]>([]);
+  const runPaletteCommandRef = useRef<(command: PaletteCommand) => void>(() => undefined);
 
   useEffect(() => {
     void window.wmux?.getVersion().then(setAppVersion).catch(() => setAppVersion("dev"));
@@ -2181,10 +2201,12 @@ export function App(): ReactElement {
   }, [activeWorkspaceId, hasHydratedPersistedState, workspaces]);
 
   const projectCommands = projectConfig?.config.commands ?? [];
-  const filteredCommands = projectCommands.filter((command) => commandMatchesQuery(command, commandQuery));
-  const normalizedSelectedCommandIndex = filteredCommands.length
-    ? Math.min(selectedCommandIndex, filteredCommands.length - 1)
-    : 0;
+  const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
+  const workspacesRef = useRef(workspaces);
+  const activeWorkspaceIdRef = useRef(activeWorkspaceId);
+  const editingWorkspaceIdRef = useRef(editingWorkspaceId);
+  const shellProfileRef = useRef(shellProfile);
+  const paletteRecentUsageRef = useRef(paletteRecentUsage);
   const configStatusText = projectConfig?.found
     ? `${projectCommands.length} 个命令（${projectConfig.sources
         ?.filter((source) => source.found)
@@ -2196,12 +2218,6 @@ export function App(): ReactElement {
         .join(" / ") || "项目"}）`
     : "未发现 wmux.json 或 .cmux/cmux.json";
   const configErrorText = projectConfig?.errors.join("；");
-
-  const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
-  const workspacesRef = useRef(workspaces);
-  const activeWorkspaceIdRef = useRef(activeWorkspaceId);
-  const editingWorkspaceIdRef = useRef(editingWorkspaceId);
-  const shellProfileRef = useRef(shellProfile);
 
   useEffect(() => {
     workspacesRef.current = workspaces;
@@ -2218,6 +2234,10 @@ export function App(): ReactElement {
   useEffect(() => {
     shellProfileRef.current = shellProfile;
   }, [shellProfile]);
+
+  useEffect(() => {
+    paletteRecentUsageRef.current = paletteRecentUsage;
+  }, [paletteRecentUsage]);
 
   useEffect(() => {
     if (!hasHydratedPersistedState) {
@@ -2318,12 +2338,6 @@ export function App(): ReactElement {
 
     return () => window.clearInterval(intervalId);
   }, [hasHydratedPersistedState, workspaces]);
-
-  useEffect(() => {
-    if (selectedCommandIndex > normalizedSelectedCommandIndex) {
-      setSelectedCommandIndex(normalizedSelectedCommandIndex);
-    }
-  }, [normalizedSelectedCommandIndex, selectedCommandIndex]);
 
   useEffect(() => {
     if (!pendingTerminalCommands.length) {
@@ -2475,6 +2489,73 @@ export function App(): ReactElement {
             ? {
                 ...withWorkspaceStatusEvent(workspace, { status: "attention", message: notice }),
                 status: "attention",
+                notice
+              }
+            : workspace
+        );
+      });
+    });
+    return cleanup;
+  }, []);
+
+  useEffect(() => {
+    const cleanup = window.wmux?.terminal.onBlock?.((event: BlockEvent) => {
+      setWorkspaces((currentWorkspaces) => {
+        const target = findSurfaceById(currentWorkspaces, event.surfaceId);
+        if (!target) {
+          return currentWorkspaces;
+        }
+
+        const upsertBlock = (block: Block): void => {
+          blockSnapshotsRef.current.set(block.id, {
+            ...block,
+            workspaceId: target.workspace.id,
+            workspaceName: target.workspace.name,
+            surfaceName: target.surface.name
+          });
+        };
+
+        if (event.type === "block:list") {
+          event.blocks.forEach(upsertBlock);
+        }
+        if (event.type === "block:start") {
+          upsertBlock({
+            ...event.block,
+            workspaceId: target.workspace.id
+          });
+        }
+        if (event.type === "block:command") {
+          const block = blockSnapshotsRef.current.get(event.blockId);
+          if (block) {
+            blockSnapshotsRef.current.set(event.blockId, { ...block, command: event.command });
+          }
+        }
+        if (event.type === "block:end") {
+          const block = blockSnapshotsRef.current.get(event.blockId);
+          if (block) {
+            const nextBlock: BlockSnapshot = {
+              ...block,
+              endedAt: event.endedAt,
+              exitCode: event.exitCode,
+              durationMs: Math.max(0, Date.parse(event.endedAt) - Date.parse(block.startedAt)),
+              status: event.exitCode === 0 ? "success" : "error"
+            };
+            blockSnapshotsRef.current.set(event.blockId, nextBlock);
+          }
+        }
+
+        if (event.type !== "block:end") {
+          return currentWorkspaces;
+        }
+
+        const status: WorkspaceStatus = event.exitCode === 0 ? "success" : "error";
+        const block = blockSnapshotsRef.current.get(event.blockId);
+        const notice = block?.command ? `${block.command} → exit ${event.exitCode}` : `Command exited ${event.exitCode}`;
+        return currentWorkspaces.map((workspace) =>
+          workspace.id === target.workspace.id
+            ? {
+                ...withWorkspaceStatusEvent(workspace, { status, message: notice }),
+                status,
                 notice
               }
             : workspace
@@ -2652,6 +2733,163 @@ export function App(): ReactElement {
       .catch(() => undefined);
   };
 
+  const buildPaletteCommands = (): PaletteCommand[] => {
+    const activePane = activeWorkspace.panes[activeWorkspace.activePaneId];
+    const activeSurface = activePane ? activeWorkspace.surfaces[activePane.activeSurfaceId] : undefined;
+    const blockCommands = [...blockSnapshotsRef.current.values()]
+      .slice(-20)
+      .reverse()
+      .map(
+        (block): PaletteCommand => ({
+          id: `block:${block.id}`,
+          category: "block",
+          title: block.command || "Terminal block",
+          subtitle: `${block.workspaceName ?? block.workspaceId} / ${block.surfaceName ?? block.surfaceId}`,
+          keywords: [block.exitCode === 0 ? "success" : "error", block.cwd ?? "", block.shell ?? ""],
+          run: () => {
+            const target = findSurfaceById(workspacesRef.current, block.surfaceId);
+            if (target) {
+              setActiveWorkspaceId(target.workspace.id);
+              setWorkspaces((items) =>
+                items.map((workspace) =>
+                  workspace.id === target.workspace.id
+                    ? {
+                        ...workspace,
+                        activePaneId: target.paneId,
+                        panes: {
+                          ...workspace.panes,
+                          [target.paneId]: {
+                            ...workspace.panes[target.paneId],
+                            activeSurfaceId: target.surface.id
+                          }
+                        }
+                      }
+                    : workspace
+                )
+              );
+            }
+          }
+        })
+      );
+
+    return [
+      ...workspaces.map(
+        (workspace): PaletteCommand => ({
+          id: `workspace:${workspace.id}`,
+          category: "workspace",
+          title: `Switch to ${workspace.name}`,
+          subtitle: workspace.cwd,
+          keywords: [workspace.name, workspace.cwd, workspace.branch ?? "", workspace.status],
+          shortcut: workspace.id === activeWorkspaceId ? "current" : undefined,
+          run: () => setActiveWorkspaceId(workspace.id)
+        })
+      ),
+      {
+        id: "workspace:new",
+        category: "workspace",
+        title: "New workspace",
+        subtitle: "Create a workspace with a terminal",
+        shortcut: "Ctrl+Shift+N",
+        run: () => handleCreateWorkspace()
+      },
+      ...(activeWorkspace
+        ? [
+            {
+              id: `workspace:rename:${activeWorkspace.id}`,
+              category: "workspace" as const,
+              title: "Rename current workspace",
+              subtitle: activeWorkspace.name,
+              shortcut: "F2",
+              run: () => handleStartRenameWorkspace(activeWorkspace)
+            },
+            {
+              id: `workspace:close:${activeWorkspace.id}`,
+              category: "workspace" as const,
+              title: "Close current workspace",
+              subtitle: activeWorkspace.name,
+              shortcut: "Ctrl+W",
+              run: () => handleCloseWorkspace(activeWorkspace.id)
+            }
+          ]
+        : []),
+      {
+        id: "surface:new-terminal",
+        category: "surface",
+        title: "New terminal surface",
+        subtitle: "Add a terminal to the active pane",
+        shortcut: "Ctrl+Shift+Enter",
+        run: () => handleAddTerminalSurface(activeWorkspace.activePaneId)
+      },
+      {
+        id: "surface:new-browser",
+        category: "surface",
+        title: "New browser surface",
+        subtitle: "Add a browser to the active pane",
+        shortcut: "Ctrl+Shift+B",
+        run: () => handleAddBrowserSurface(activeWorkspace.activePaneId)
+      },
+      {
+        id: "surface:split-horizontal",
+        category: "surface",
+        title: "Split horizontally",
+        subtitle: "Create a side-by-side pane",
+        shortcut: "Ctrl+Alt+↑",
+        run: () => handleSplitActivePane("horizontal")
+      },
+      {
+        id: "surface:split-vertical",
+        category: "surface",
+        title: "Split vertically",
+        subtitle: "Create a stacked pane",
+        shortcut: "Ctrl+Alt+↓",
+        run: () => handleSplitActivePane("vertical")
+      },
+      ...(activeSurface
+        ? [
+            {
+              id: `surface:close:${activeSurface.id}`,
+              category: "surface" as const,
+              title: "Close active surface",
+              subtitle: activeSurface.name,
+              shortcut: "Ctrl+W",
+              run: () => handleCloseActiveSurface()
+            }
+          ]
+        : []),
+      ...projectCommands.map(
+        (command): PaletteCommand => ({
+          id: `project:${command.sourcePath ?? projectConfig?.path ?? "wmux.json"}:${command.name}`,
+          category: "project",
+          title: command.name,
+          subtitle: command.description ?? command.command ?? command.workspace?.name ?? "项目自定义命令",
+          keywords: [command.name, command.description ?? "", command.command ?? "", ...(command.keywords ?? [])],
+          icon: command.workspace ? "workspace" : "terminal",
+          run: () => runProjectCommand(command)
+        })
+      ),
+      ...blockCommands,
+      {
+        id: "settings:open",
+        category: "settings",
+        title: "Open settings",
+        subtitle: "Socket security and app settings",
+        run: () => {
+          setSettingsOpen(true);
+          setNotificationsOpen(false);
+        }
+      },
+      {
+        id: "settings:reload-config",
+        category: "settings",
+        title: "Reload wmux config",
+        subtitle: projectConfig?.path ?? "wmux.json",
+        run: () => {
+          void window.wmux?.config.loadProjectConfig().then(setProjectConfig).catch(() => undefined);
+        }
+      }
+    ];
+  };
+
   const updateActiveWorkspace = (updater: (workspace: Workspace) => Workspace): void => {
     setWorkspaces((currentWorkspaces) =>
       currentWorkspaces.map((workspace) => (workspace.id === activeWorkspace.id ? updater(workspace) : workspace))
@@ -2724,6 +2962,31 @@ export function App(): ReactElement {
               createSocketErrorResponse(request.id, "INTERNAL", `读取项目配置失败：${error instanceof Error ? error.message : String(error)}`)
             );
           });
+        return;
+      }
+
+      if (request.method === "palette.open") {
+        const params = (request.params ?? {}) as Partial<PaletteOpenParams>;
+        setCommandQuery(typeof params.query === "string" ? params.query : "");
+        setSelectedCommandIndex(0);
+        setCommandPaletteOpen(true);
+        window.wmux?.socket.respond(createSocketSuccessResponse(request.id, { opened: true }));
+        return;
+      }
+
+      if (request.method === "palette.run") {
+        const params = (request.params ?? {}) as Partial<PaletteRunParams>;
+        const commands = rankPaletteCommands(paletteCommandsRef.current, params.query ?? "", {
+          recentUsage: paletteRecentUsageRef.current
+        });
+        const command =
+          typeof params.id === "string" ? commands.find((item) => item.id === params.id) : commands[0];
+        if (!command) {
+          window.wmux?.socket.respond(createSocketErrorResponse(request.id, "NOT_FOUND", "找不到 palette 命令"));
+          return;
+        }
+        runPaletteCommandRef.current(command);
+        window.wmux?.socket.respond(createSocketSuccessResponse(request.id, { id: command.id, title: command.title }));
         return;
       }
 
@@ -3346,6 +3609,51 @@ export function App(): ReactElement {
         return;
       }
 
+      if (request.method === "block.list") {
+        const params = (request.params ?? {}) as Partial<BlockListParams>;
+        const limit =
+          typeof params.limit === "number" && Number.isFinite(params.limit) && params.limit > 0
+            ? Math.min(500, Math.floor(params.limit))
+            : 50;
+        const blocks = [...blockSnapshotsRef.current.values()]
+          .filter((block) => !params.surfaceId || block.surfaceId === params.surfaceId)
+          .slice(-limit)
+          .reverse();
+        window.wmux?.socket.respond(createSocketSuccessResponse(request.id, { blocks }));
+        return;
+      }
+
+      if (request.method === "block.get") {
+        const params = (request.params ?? {}) as Partial<BlockGetParams>;
+        if (typeof params.blockId !== "string" || !params.blockId.trim()) {
+          window.wmux?.socket.respond(createSocketErrorResponse(request.id, "BAD_REQUEST", "block.get 需要 blockId"));
+          return;
+        }
+        const block = blockSnapshotsRef.current.get(params.blockId);
+        if (!block) {
+          window.wmux?.socket.respond(createSocketErrorResponse(request.id, "NOT_FOUND", "找不到 block", { blockId: params.blockId }));
+          return;
+        }
+        window.wmux?.socket.respond(createSocketSuccessResponse(request.id, { block }));
+        return;
+      }
+
+      if (request.method === "block.rerun") {
+        const params = (request.params ?? {}) as Partial<BlockRerunParams>;
+        if (typeof params.blockId !== "string" || !params.blockId.trim()) {
+          window.wmux?.socket.respond(createSocketErrorResponse(request.id, "BAD_REQUEST", "block.rerun 需要 blockId"));
+          return;
+        }
+        const block = blockSnapshotsRef.current.get(params.blockId);
+        if (!block) {
+          window.wmux?.socket.respond(createSocketErrorResponse(request.id, "NOT_FOUND", "找不到 block", { blockId: params.blockId }));
+          return;
+        }
+        window.wmux?.terminal.input({ id: `${block.surfaceId}:${shellProfileRef.current}`, data: block.command });
+        window.wmux?.socket.respond(createSocketSuccessResponse(request.id, { blockId: block.id, surfaceId: block.surfaceId }));
+        return;
+      }
+
       if (isBrowserRpcMethod(request.method)) {
         void runBrowserRpc(
           request.method,
@@ -3861,13 +4169,40 @@ export function App(): ReactElement {
     });
   };
 
+  const paletteCommands = buildPaletteCommands();
+  paletteCommandsRef.current = paletteCommands;
+  const filteredCommands = rankPaletteCommands(paletteCommands, commandQuery, {
+    recentUsage: paletteRecentUsage
+  });
+  const normalizedSelectedCommandIndex = filteredCommands.length
+    ? Math.min(selectedCommandIndex, filteredCommands.length - 1)
+    : 0;
+
+  useEffect(() => {
+    if (selectedCommandIndex > normalizedSelectedCommandIndex) {
+      setSelectedCommandIndex(normalizedSelectedCommandIndex);
+    }
+  }, [normalizedSelectedCommandIndex, selectedCommandIndex]);
+
+  const runPaletteCommand = (command: PaletteCommand): void => {
+    const nextUsage = recordRecentCommandUsage(paletteRecentUsageRef.current, command.id);
+    setPaletteRecentUsage(nextUsage);
+    paletteRecentUsageRef.current = nextUsage;
+    void Promise.resolve(command.run()).finally(() => {
+      if (!command.id.startsWith("project:")) {
+        closeCommandPalette();
+      }
+    });
+  };
+  runPaletteCommandRef.current = runPaletteCommand;
+
   useEffect(() => {
     const handleGlobalKeyDown = (event: KeyboardEvent): void => {
       const key = event.key.toLowerCase();
       const isPrimary = event.ctrlKey || event.metaKey;
       const isPlain = !event.ctrlKey && !event.metaKey && !event.altKey;
 
-      if (isPrimary && key === "k") {
+      if (isPrimary && (key === "k" || key === "p")) {
         event.preventDefault();
         openCommandPalette();
         return;
@@ -4041,7 +4376,7 @@ export function App(): ReactElement {
           setCommandQuery(value);
           setSelectedCommandIndex(0);
         }}
-        onRun={runProjectCommand}
+        onRun={runPaletteCommand}
         onSelectedIndexChange={setSelectedCommandIndex}
       />
       <FindBar
@@ -4130,7 +4465,7 @@ function CommandPalette({
   onRun,
   onSelectedIndexChange
 }: {
-  commands: WmuxCommandConfig[];
+  commands: PaletteCommand[];
   configError?: string;
   configStatus: string;
   isOpen: boolean;
@@ -4138,7 +4473,7 @@ function CommandPalette({
   selectedIndex: number;
   onClose: () => void;
   onQueryChange: (value: string) => void;
-  onRun: (command: WmuxCommandConfig) => void;
+  onRun: (command: PaletteCommand) => void;
   onSelectedIndexChange: (index: number) => void;
 }): ReactElement | null {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -4198,7 +4533,7 @@ function CommandPalette({
             ref={inputRef}
             aria-label="Command search"
             value={query}
-            placeholder="搜索 wmux 命令或工作区布局"
+            placeholder="搜索 workspace、surface、命令和块"
             onChange={(event) => onQueryChange(event.target.value)}
             onKeyDown={handleKeyDown}
           />
@@ -4210,30 +4545,46 @@ function CommandPalette({
         </div>
         <div className="commandPaletteList" role="listbox" aria-label="Command results">
           {commands.length ? (
-            commands.map((command, index) => (
-              <button
-                className={`commandPaletteItem ${index === selectedIndex ? "commandPaletteItemActive" : ""}`}
-                key={`${command.name}-${index}`}
-                type="button"
-                role="option"
-                aria-selected={index === selectedIndex}
-                onMouseEnter={() => onSelectedIndexChange(index)}
-                onClick={() => onRun(command)}
-              >
-                <span className="commandPaletteItemIcon">
-                  {command.workspace ? <LayoutGrid size={16} /> : <Terminal size={16} />}
-                </span>
-                <span className="commandPaletteItemMain">
-                  <span className="commandPaletteItemTitle">{command.name}</span>
-                  <span className="commandPaletteItemDescription">
-                    {command.description ?? command.command ?? command.workspace?.name ?? "项目自定义命令"}
-                  </span>
-                </span>
-                <span className="commandPaletteItemMeta">{getCommandTypeLabel(command)}</span>
-              </button>
-            ))
+            commands.map((command, index) => {
+              const previousCategory = commands[index - 1]?.category;
+              const showHeader = previousCategory !== command.category;
+              return (
+                <div className="commandPaletteGroup" key={command.id}>
+                  {showHeader && <div className="commandPaletteSectionHeader">{getPaletteCategoryLabel(command.category)}</div>}
+                  <button
+                    className={`commandPaletteItem ${index === selectedIndex ? "commandPaletteItemActive" : ""}`}
+                    type="button"
+                    role="option"
+                    aria-selected={index === selectedIndex}
+                    onMouseEnter={() => onSelectedIndexChange(index)}
+                    onClick={() => onRun(command)}
+                  >
+                    <span className="commandPaletteItemIcon">
+                      {command.category === "workspace" ? (
+                        <LayoutGrid size={16} />
+                      ) : command.category === "settings" ? (
+                        <Settings size={16} />
+                      ) : command.category === "block" ? (
+                        <Activity size={16} />
+                      ) : command.icon === "workspace" ? (
+                        <LayoutGrid size={16} />
+                      ) : (
+                        <Terminal size={16} />
+                      )}
+                    </span>
+                    <span className="commandPaletteItemMain">
+                      <span className="commandPaletteItemTitle">{command.title}</span>
+                      <span className="commandPaletteItemDescription">
+                        {command.subtitle ?? "wmux command"}
+                      </span>
+                    </span>
+                    <span className="commandPaletteItemMeta">{command.shortcut ?? getPaletteCategoryLabel(command.category)}</span>
+                  </button>
+                </div>
+              );
+            })
           ) : (
-            <div className="commandPaletteEmpty">没有匹配的项目命令</div>
+            <div className="commandPaletteEmpty">没有匹配的命令</div>
           )}
         </div>
       </section>
@@ -4535,7 +4886,7 @@ function WorkspaceSidebar({
       <button className="searchButton" type="button" onClick={onOpenCommandPalette}>
         <Search size={15} />
         <span>Search workspace</span>
-        <kbd>⌘K</kbd>
+        <kbd>⌘P</kbd>
       </button>
 
       <div className="sidebarSectionHeader">
@@ -5155,6 +5506,7 @@ function PaneView({
           >
             <SurfaceBody
               surface={surface}
+              workspaceId={workspace.id}
               cwd={workspace.cwd}
               shellProfile={shellProfile}
               onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle}
@@ -5242,6 +5594,7 @@ function SurfaceTabs({
 
 function SurfaceBody({
   surface,
+  workspaceId,
   cwd,
   shellProfile,
   onUpdateSurfaceSubtitle,
@@ -5249,6 +5602,7 @@ function SurfaceBody({
   onTerminalOutput
 }: {
   surface: Surface;
+  workspaceId: string;
   cwd: string;
   shellProfile: ShellProfile;
   onUpdateSurfaceSubtitle: (surfaceId: string, subtitle: string) => void;
@@ -5262,6 +5616,7 @@ function SurfaceBody({
   return (
     <TerminalSurface
       surface={surface}
+      workspaceId={workspaceId}
       cwd={cwd}
       shell={shellProfile}
       onOpenUrl={onOpenTerminalUrl}

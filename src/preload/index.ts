@@ -1,6 +1,7 @@
 import { clipboard, contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type {
   AppUpdateStatus,
+  BlockEvent,
   PersistedAppState,
   ShellProfile,
   ShellProfileOption,
@@ -42,6 +43,8 @@ const api = {
     listShells: (): Promise<ShellProfileOption[]> => ipcRenderer.invoke("terminal:listShells"),
     create: (payload: {
       id: string;
+      surfaceId?: string;
+      workspaceId?: string;
       cwd?: string;
       cols?: number;
       rows?: number;
@@ -70,6 +73,11 @@ const api = {
       const listener = (_event: IpcRendererEvent, payload: TerminalNotificationPayload): void => callback(payload);
       ipcRenderer.on("terminal:notification", listener);
       return () => ipcRenderer.removeListener("terminal:notification", listener);
+    },
+    onBlock: (callback: (payload: BlockEvent) => void): (() => void) => {
+      const listener = (_event: IpcRendererEvent, payload: BlockEvent): void => callback(payload);
+      ipcRenderer.on("terminal:block", listener);
+      return () => ipcRenderer.removeListener("terminal:block", listener);
     }
   },
   browser: {

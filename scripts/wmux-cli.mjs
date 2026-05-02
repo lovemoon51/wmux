@@ -27,6 +27,11 @@ function printUsage() {
   wmux identify [--json]
   wmux capabilities [--json]
   wmux config [--json]
+  wmux palette open [--query <text>] [--json]
+  wmux palette run [--id <commandId>] [--query <text>] [--json]
+  wmux block list [--surface <id>] [--limit <count>] [--json]
+  wmux block get --block <id> [--json]
+  wmux block rerun --block <id> [--json]
   wmux list-workspaces [--json]
   wmux current-workspace [--json]
   wmux new-workspace [--name <name>] [--cwd <path>] [--json]
@@ -48,7 +53,7 @@ function printUsage() {
   wmux clear-status [--workspace <id>] [--json]
   wmux status set --status idle|running|attention|success|error [--notice <text>] [--workspace <id>] [--json]
   wmux status list [--workspace <id>] [--json]
-  wmux status history [--workspace <id>] [--json]
+  wmux status history [--workspace <id>] [--limit <count>] [--json]
   wmux browser navigate <url> [--surface <id>] [--create] [--wait load|domcontentloaded|none] [--timeout <ms>] [--json]
   wmux browser open <url> [--json]
   wmux browser list [--json]
@@ -111,9 +116,11 @@ function hasFlag(name) {
 const optionFlagsWithValues = new Set([
   "--area",
   "--body",
+  "--block",
   "--cwd",
   "--direction",
   "--format",
+  "--id",
   "--key",
   "--load-wait",
   "--limit",
@@ -121,6 +128,7 @@ const optionFlagsWithValues = new Set([
   "--notice",
   "--out",
   "--pane",
+  "--query",
   "--selector",
   "--surface",
   "--status",
@@ -521,6 +529,60 @@ function createRequest() {
     return { method: "config.list", params: {} };
   }
 
+  if (command === "palette") {
+    const paletteCommand = args[1];
+    const query = parseOption("--query");
+    if (paletteCommand === "open") {
+      return {
+        method: "palette.open",
+        params: {
+          ...(query ? { query } : {})
+        }
+      };
+    }
+    if (paletteCommand === "run") {
+      const id = parseOption("--id");
+      if (hasFlag("--id") && (!id || id.startsWith("--"))) {
+        throw cliError("palette run 的 --id 需要 command id");
+      }
+      return {
+        method: "palette.run",
+        params: {
+          ...(id ? { id } : {}),
+          ...(query ? { query } : {})
+        }
+      };
+    }
+    throw cliError(`未知 palette 命令：${paletteCommand ?? ""}`);
+  }
+
+  if (command === "block") {
+    const blockCommand = args[1];
+    if (blockCommand === "list") {
+      const limit = readLimit();
+      return {
+        method: "block.list",
+        params: {
+          ...(parseOption("--surface") ? { surfaceId: parseOption("--surface") } : {}),
+          ...(limit ? { limit } : {})
+        }
+      };
+    }
+    if (blockCommand === "get" || blockCommand === "rerun") {
+      const blockId = parseOption("--block");
+      if (!blockId || blockId.startsWith("--")) {
+        throw cliError(`block ${blockCommand} 需要 --block <id>`);
+      }
+      return {
+        method: blockCommand === "get" ? "block.get" : "block.rerun",
+        params: {
+          blockId
+        }
+      };
+    }
+    throw cliError(`未知 block 命令：${blockCommand ?? ""}`);
+  }
+
   if (command === "list-workspaces") {
     return { method: "workspace.list", params: {} };
   }
@@ -784,10 +846,12 @@ function createRequest() {
       throw cliError(`未知 status 命令：${statusCommand ?? ""}`);
     }
 
+    const limit = statusCommand === "history" ? readLimit() : undefined;
     return {
       method: "status.list",
       params: {
-        ...(workspaceId ? { workspaceId } : {})
+        ...(workspaceId ? { workspaceId } : {}),
+        ...(limit ? { limit } : {})
       }
     };
   }
@@ -1050,6 +1114,35 @@ function printResult(result) {
     return;
   }
 
+  if (command === "palette") {
+    if (args[1] === "open") {
+      console.log(result?.opened ? "palette opened" : "palette request sent");
+      return;
+    }
+    console.log(`ran ${result?.id ?? "palette command"}${result?.title ? `\t${result.title}` : ""}`);
+    return;
+  }
+
+  if (command === "block") {
+    const blockCommand = args[1];
+    if (blockCommand === "list") {
+      for (const block of result?.blocks ?? []) {
+        const exit = block.exitCode === undefined ? block.status : `exit ${block.exitCode}`;
+        console.log(`${block.id}\t${block.surfaceId}\t${exit}\t${block.command ?? ""}`);
+      }
+      return;
+    }
+    if (blockCommand === "get") {
+      const block = result?.block;
+      console.log(`${block?.id ?? ""}\t${block?.surfaceId ?? ""}\t${block?.status ?? ""}\t${block?.command ?? ""}`);
+      return;
+    }
+    if (blockCommand === "rerun") {
+      console.log(`rerun ${result?.blockId ?? "block"} on ${result?.surfaceId ?? "surface"}`);
+      return;
+    }
+  }
+
   if (command === "list-workspaces") {
     for (const workspace of result?.workspaces ?? []) {
       const activePrefix = workspace.active ? "*" : " ";
@@ -1142,7 +1235,7 @@ function printResult(result) {
     if (statusCommand === "history") {
       for (const item of result?.statuses ?? []) {
         for (const event of item.recentEvents ?? []) {
-          console.log(`${item.name}\t${event.status}\t${event.message}`);
+          console.log(`${event.at}\t${item.name}\t${event.status}\t${event.message}`);
         }
       }
       return;

@@ -180,7 +180,7 @@ function log(message) {
 }
 
 async function launchApp() {
-  return electron.launch({
+  const app = await electron.launch({
     executablePath: electronPath,
     args: ["out/main/index.js"],
     env: {
@@ -192,6 +192,10 @@ async function launchApp() {
       WMUX_SOCKET_TOKEN: smokeSocketToken
     }
   });
+  app.process()?.once("exit", (code, signal) => {
+    appendFileSync(logPath, `electron exit code=${code ?? "null"} signal=${signal ?? "null"}\n`);
+  });
+  return app;
 }
 
 async function startSmokePortServer() {
@@ -418,7 +422,7 @@ async function runAgentAttentionSmoke(window) {
   await window.locator('button.surfaceTab[aria-label="Codex Agent"]').click();
   await runTerminalCommand(
     window,
-    'Write-Output "Press enter to confirm or esc to cancel"',
+    '$wmuxAttentionPrompt = "Press enter to confirm" + " or esc to cancel"; Write-Output $wmuxAttentionPrompt',
     "Press enter to confirm or esc to cancel"
   );
   const apiWorkspaceItem = window.locator(".workspaceItem").filter({ hasText: "API Server" }).first();
@@ -447,6 +451,7 @@ async function waitForActiveTerminalRowText(window, text) {
 
 async function runTerminalSelectionStabilitySmoke(window) {
   log("terminal selection stability");
+  await window.locator('button.surfaceTab[aria-label="Codex Agent"]').click();
   const terminal = window.locator(".paneActive .surfaceBodyFrameActive .terminalHost .xterm").first();
   await terminal.waitFor({ state: "attached", timeout: 15_000 });
   const box = await terminal.boundingBox();
@@ -498,10 +503,12 @@ async function runRightClickClipboardSmoke(app, window) {
     const rowRect = row.getBoundingClientRect();
     const hostRect = host.getBoundingClientRect();
     const markerStart = row.textContent?.indexOf(marker) ?? -1;
-    const characterWidth = rowRect.width / Math.max(1, row.textContent?.length ?? marker.length);
+    const xterm = host.querySelector(".xterm");
+    const dimensions = xterm?._core?._renderService?.dimensions;
+    const cellWidth = dimensions?.css?.cell?.width ?? rowRect.width / Math.max(1, row.textContent?.length ?? marker.length);
     return {
-      startX: rowRect.left + markerStart * characterWidth + 2,
-      endX: rowRect.left + (markerStart + marker.length) * characterWidth - 2,
+      startX: Math.max(rowRect.left + markerStart * cellWidth + 2, hostRect.left + 4),
+      endX: Math.min(rowRect.left + (markerStart + marker.length) * cellWidth - 2, hostRect.right - 4),
       y: rowRect.top + rowRect.height / 2,
       fallbackX: hostRect.left + 24
     };
@@ -512,7 +519,7 @@ async function runRightClickClipboardSmoke(app, window) {
 
   await window.mouse.move(markerBox.startX, markerBox.y);
   await window.mouse.down();
-  await window.mouse.move(markerBox.endX, markerBox.y, { steps: 8 });
+  await window.mouse.move(markerBox.endX, markerBox.y, { steps: 12 });
   await window.mouse.up();
   await window.mouse.click(markerBox.fallbackX, markerBox.y, { button: "right" });
   await window.waitForFunction(() => window.wmux?.clipboard.readText().includes("WMUX_RIGHT_CLICK_COPY"), null, {
@@ -1087,6 +1094,15 @@ async function runCliSocketSmoke(window) {
   if (!statusHistoryOutput.includes("API Server") || !statusHistoryOutput.includes("WMUX_CLI_NOTIFY: socket smoke")) {
     throw new Error(`wmux status history did not include prior notice: ${statusHistoryOutput}`);
   }
+  if (!/\d{4}-\d{2}-\d{2}T/.test(statusHistoryOutput)) {
+    throw new Error(`wmux status history did not include event timestamps: ${statusHistoryOutput}`);
+  }
+  const limitedStatusHistoryOutput = await runCliCommand(["status", "history", "--limit", "1", "--json"]);
+  const limitedStatusHistory = JSON.parse(limitedStatusHistoryOutput);
+  const apiLimitedStatus = limitedStatusHistory.statuses?.find((item) => item.name === "API Server");
+  if ((apiLimitedStatus?.recentEvents ?? []).length > 1) {
+    throw new Error(`wmux status history --limit did not trim recent events: ${limitedStatusHistoryOutput}`);
+  }
   const statusHistoryJsonOutput = await runCliCommand(["status", "history", "--json"]);
   const statusHistory = JSON.parse(statusHistoryJsonOutput);
   if (
@@ -1559,17 +1575,6 @@ async function dragSurfaceToPaneEdge(source, target, edge, expectedPaneCount) {
       }
     }
   }
-}
-
-async function waitForWorkspaceStateText(text) {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < 15_000) {
-    if (existsSync(smokeWorkspaceStatePath) && readFileSync(smokeWorkspaceStatePath, "utf8").includes(text)) {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 200));
-  }
-  throw new Error(`workspace state did not include ${text}`);
 }
 
 async function waitForWorkspaceState(workspaceName, predicate, description) {

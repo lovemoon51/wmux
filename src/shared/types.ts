@@ -66,6 +66,87 @@ export type WmuxProjectConfig = {
   commands: WmuxCommandConfig[];
 };
 
+export type PaletteCommandCategory =
+  | "workspace"
+  | "surface"
+  | "project"
+  | "workflow"
+  | "block"
+  | "ai"
+  | "settings";
+
+export type PaletteCommandArg = {
+  name: string;
+  description?: string;
+  default?: string;
+  required?: boolean;
+  options?: string[] | (() => Promise<string[]>);
+};
+
+export type PaletteCommand = {
+  id: string;
+  category: PaletteCommandCategory;
+  title: string;
+  subtitle?: string;
+  keywords?: string[];
+  shortcut?: string;
+  icon?: string;
+  args?: PaletteCommandArg[];
+  run: (args?: Record<string, string>) => Promise<void> | void;
+};
+
+export type PaletteOpenParams = {
+  query?: string;
+};
+
+export type PaletteRunParams = {
+  id?: string;
+  query?: string;
+};
+
+export type BlockId = string;
+
+export type BlockStatus = "running" | "success" | "error" | "aborted";
+
+export type Block = {
+  id: BlockId;
+  surfaceId: string;
+  workspaceId: string;
+  startLine: number;
+  endLine?: number;
+  command: string;
+  cwd?: string;
+  shell?: string;
+  startedAt: string;
+  endedAt?: string;
+  durationMs?: number;
+  exitCode?: number;
+  status: BlockStatus;
+  pinned?: boolean;
+  outputByteStart?: number;
+  outputByteEnd?: number;
+};
+
+export type BlockEvent =
+  | { type: "block:list"; surfaceId: string; blocks: Block[] }
+  | { type: "block:start"; surfaceId: string; block: Block }
+  | { type: "block:command"; surfaceId: string; blockId: BlockId; command: string }
+  | { type: "block:output"; surfaceId: string; blockId: BlockId; chunkBytes: number }
+  | { type: "block:end"; surfaceId: string; blockId: BlockId; exitCode: number; endedAt: string };
+
+export type BlockListParams = {
+  surfaceId?: string;
+  limit?: number;
+};
+
+export type BlockGetParams = {
+  blockId: string;
+};
+
+export type BlockRerunParams = {
+  blockId: string;
+};
+
 export type WmuxConfigSource = {
   kind: WmuxConfigSourceKind;
   path: string;
@@ -105,6 +186,8 @@ export type SocketRpcMethod =
   | "system.identify"
   | "system.capabilities"
   | "config.list"
+  | "palette.open"
+  | "palette.run"
   | "workspace.list"
   | "workspace.create"
   | "workspace.select"
@@ -121,6 +204,9 @@ export type SocketRpcMethod =
   | "status.set"
   | "status.clear"
   | "status.list"
+  | "block.list"
+  | "block.get"
+  | "block.rerun"
   | BrowserRpcMethod;
 
 export type SocketRpcRequest = {
@@ -212,6 +298,7 @@ export type ClearStatusParams = {
 
 export type StatusListParams = {
   workspaceId?: string;
+  limit?: number;
 };
 
 export type WorkspaceCreateParams = {
