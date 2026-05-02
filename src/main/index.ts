@@ -8,6 +8,7 @@ import { homedir, tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { registerPtyIpc } from "./pty/ptyManager";
 import { hydrateBlocksFromState, hydrateOutputBuffersFromState, snapshotBlocks, snapshotOutputBuffers } from "./pty/ptyManager";
+import { registerCompletionIpc } from "./ipc/completionBridge";
 import {
   deserializePersistedBlocks,
   deserializeOutputBuffers,
@@ -752,6 +753,7 @@ app.whenReady().then(() => {
     }
   );
   registerPtyIpc();
+  registerCompletionIpc();
   registerSocketBridgeIpc();
 
   // 跨重启 scrollback 持久化：在 IPC 注册后立即 hydrate，保证终端 surface

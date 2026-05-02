@@ -787,6 +787,10 @@ export function TerminalSurface({
               value={inputDraft}
               enabled={isModernInputCaptured}
               focusToken={inputFocusToken}
+              cwd={cwd}
+              shell={shell}
+              surfaceId={surface.id}
+              workspaceId={workspaceId}
               onChange={setInputDraft}
               onSubmit={submitInputDraft}
               onInterrupt={interruptTerminal}

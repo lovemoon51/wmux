@@ -139,6 +139,37 @@ export type TerminalInputModeEvent =
   | { type: "input:command-started"; surfaceId: string; sessionId: string; command?: string }
   | { type: "input:alt-screen"; surfaceId: string; sessionId: string; active: boolean };
 
+export type CompletionDirectoryEntryKind = "file" | "directory";
+
+export type CompletionDirectoryEntry = {
+  name: string;
+  kind: CompletionDirectoryEntryKind;
+  relativePath: string;
+};
+
+export type CompletionListDirectoryParams = {
+  workspaceId: string;
+  cwd: string;
+  query: string;
+  includeHidden?: boolean;
+  limit?: number;
+};
+
+export type CompletionListDirectoryResult = {
+  entries: CompletionDirectoryEntry[];
+};
+
+export type CompletionListGitBranchesParams = {
+  workspaceId: string;
+  cwd: string;
+  prefix?: string;
+  limit?: number;
+};
+
+export type CompletionListGitBranchesResult = {
+  branches: string[];
+};
+
 export type BlockListParams = {
   surfaceId?: string;
   limit?: number;

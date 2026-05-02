@@ -2,6 +2,10 @@ import { clipboard, contextBridge, ipcRenderer, type IpcRendererEvent } from "el
 import type {
   AppUpdateStatus,
   BlockEvent,
+  CompletionListDirectoryParams,
+  CompletionListDirectoryResult,
+  CompletionListGitBranchesParams,
+  CompletionListGitBranchesResult,
   PersistedAppState,
   ShellProfile,
   ShellProfileOption,
@@ -89,6 +93,12 @@ const api = {
   browser: {
     writeScreenshot: (payload: { path: string; base64: string; format: "png" | "jpeg" }): Promise<{ path: string; bytes: number }> =>
       ipcRenderer.invoke("browser:writeScreenshot", payload)
+  },
+  completion: {
+    listDirectory: (payload: CompletionListDirectoryParams): Promise<CompletionListDirectoryResult> =>
+      ipcRenderer.invoke("completion:listDirectory", payload),
+    listGitBranches: (payload: CompletionListGitBranchesParams): Promise<CompletionListGitBranchesResult> =>
+      ipcRenderer.invoke("completion:listGitBranches", payload)
   },
   clipboard: {
     readText: (): string => clipboard.readText(),

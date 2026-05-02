@@ -1,13 +1,20 @@
+import { autocompletion, completionKeymap, completionStatus, startCompletion } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { bracketMatching, foldGutter, indentOnInput } from "@codemirror/language";
 import { EditorState } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, placeholder } from "@codemirror/view";
+import type { ShellProfile } from "@shared/types";
 import { useEffect, useRef, type ReactElement } from "react";
+import { createShellCompletionSource } from "../lib/completion/createShellCompletionSource";
 
 type InputEditorProps = {
   value: string;
   enabled: boolean;
   focusToken: number;
+  cwd: string;
+  shell: ShellProfile;
+  surfaceId: string;
+  workspaceId: string;
   onChange: (value: string) => void;
   onSubmit: () => void;
   onInterrupt: () => void;
@@ -18,6 +25,10 @@ export function InputEditor({
   value,
   enabled,
   focusToken,
+  cwd,
+  shell,
+  surfaceId,
+  workspaceId,
   onChange,
   onSubmit,
   onInterrupt,
@@ -30,6 +41,7 @@ export function InputEditor({
   const onSubmitRef = useRef(onSubmit);
   const onInterruptRef = useRef(onInterrupt);
   const onToggleCaptureRef = useRef(onToggleCapture);
+  const completionContextRef = useRef({ cwd, shell, surfaceId, workspaceId });
 
   useEffect(() => {
     valueRef.current = value;
@@ -52,6 +64,10 @@ export function InputEditor({
   }, [onToggleCapture]);
 
   useEffect(() => {
+    completionContextRef.current = { cwd, shell, surfaceId, workspaceId };
+  }, [cwd, shell, surfaceId, workspaceId]);
+
+  useEffect(() => {
     const host = hostRef.current;
     if (!host) {
       return;
@@ -68,13 +84,26 @@ export function InputEditor({
           indentOnInput(),
           bracketMatching(),
           placeholder("Type a command"),
+          autocompletion({
+            override: [createShellCompletionSource(() => completionContextRef.current)],
+            maxRenderedOptions: 8,
+            activateOnTyping: true
+          }),
           keymap.of([
+            ...completionKeymap,
             {
               key: "Enter",
-              run: () => {
+              run: (editorView) => {
+                if (completionStatus(editorView.state) === "active") {
+                  return false;
+                }
                 onSubmitRef.current();
                 return true;
               }
+            },
+            {
+              key: "Ctrl-Space",
+              run: startCompletion
             },
             {
               key: "Shift-Enter",
