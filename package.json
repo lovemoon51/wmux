@@ -24,6 +24,10 @@
     "smoke:browser": "node scripts/smoke-browser-automation.mjs"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.10.3",
+    "@codemirror/language": "^6.12.3",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/view": "^6.41.1",
     "@vitejs/plugin-react": "^5.0.4",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-ligatures": "^0.10.0",

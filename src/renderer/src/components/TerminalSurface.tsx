@@ -6,8 +6,16 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { Activity, Code2, Minus, Plus } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
-import type { Block, BlockEvent, ShellProfile, Surface, WorkspaceStatus } from "@shared/types";
+import type { Block, BlockEvent, ShellProfile, Surface, TerminalInputModeEvent, WorkspaceStatus } from "@shared/types";
 import { BlockOverlay } from "./BlockOverlay";
+import { InputEditor } from "./InputEditor";
+import {
+  createModernInputState,
+  reduceModernInputState,
+  shouldModernInputCapture,
+  type ModernInputState
+} from "../lib/inputEditorState";
+import { prepareCommandSubmission } from "../lib/inputSubmission";
 import "@xterm/xterm/css/xterm.css";
 
 // 终端字体栈：优先 Nerd Font 与等宽字体，最终退回 monospace
@@ -80,8 +88,14 @@ export function TerminalSurface({
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [focusedBlockId, setFocusedBlockId] = useState<string | undefined>();
   const [viewportY, setViewportY] = useState(0);
+  const [modernInputState, setModernInputState] = useState<ModernInputState>(() => createModernInputState());
+  const [inputDraft, setInputDraft] = useState("");
+  const [inputFocusToken, setInputFocusToken] = useState(0);
   const blocksRef = useRef<Block[]>([]);
   const focusedBlockIdRef = useRef<string | undefined>(undefined);
+  const modernInputStateRef = useRef(modernInputState);
+  const inputDraftRef = useRef(inputDraft);
+  const isModernInputCaptured = shouldModernInputCapture(modernInputState);
 
   useEffect(() => {
     onOpenUrlRef.current = onOpenUrl;
@@ -98,6 +112,14 @@ export function TerminalSurface({
   useEffect(() => {
     focusedBlockIdRef.current = focusedBlockId;
   }, [focusedBlockId]);
+
+  useEffect(() => {
+    modernInputStateRef.current = modernInputState;
+  }, [modernInputState]);
+
+  useEffect(() => {
+    inputDraftRef.current = inputDraft;
+  }, [inputDraft]);
 
   const focusBlock = useCallback((blockId: string): void => {
     setFocusedBlockId(blockId);
@@ -138,8 +160,43 @@ export function TerminalSurface({
     if (!commandText) {
       return;
     }
+    if (shouldModernInputCapture(modernInputStateRef.current)) {
+      setInputDraft(commandText);
+      setInputFocusToken((token) => token + 1);
+      return;
+    }
     window.wmux?.terminal.input({ id: sessionId, data: commandText });
   }, [sessionId]);
+
+  const dispatchModernInputEvent = useCallback((event: Parameters<typeof reduceModernInputState>[1]): void => {
+    setModernInputState((currentState) => reduceModernInputState(currentState, event));
+  }, []);
+
+  const focusInput = useCallback((): void => {
+    if (shouldModernInputCapture(modernInputStateRef.current)) {
+      setInputFocusToken((token) => token + 1);
+      return;
+    }
+    terminalRef.current?.focus();
+  }, []);
+
+  const submitInputDraft = useCallback((): void => {
+    const submission = prepareCommandSubmission(inputDraftRef.current);
+    if (submission.kind === "empty") {
+      setInputDraft("");
+      setInputFocusToken((token) => token + 1);
+      return;
+    }
+    window.wmux?.terminal.input({ id: sessionId, data: submission.data });
+    setInputDraft("");
+    dispatchModernInputEvent({ type: "command:started" });
+  }, [dispatchModernInputEvent, sessionId]);
+
+  const interruptTerminal = useCallback((): void => {
+    window.wmux?.terminal.input({ id: sessionId, data: "\x03" });
+    setInputDraft("");
+    dispatchModernInputEvent({ type: "command:started" });
+  }, [dispatchModernInputEvent, sessionId]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -292,6 +349,10 @@ export function TerminalSurface({
 
     const focusTerminal = (event: MouseEvent): void => {
       if (event.button === 0) {
+        if (shouldModernInputCapture(modernInputStateRef.current)) {
+          setInputFocusToken((token) => token + 1);
+          return;
+        }
         terminal.focus();
       }
     };
@@ -426,9 +487,14 @@ export function TerminalSurface({
 
       const text = window.wmux?.clipboard.readText() ?? "";
       if (text) {
-        terminal.paste(text);
+        if (shouldModernInputCapture(modernInputStateRef.current)) {
+          setInputDraft((currentValue) => `${currentValue}${text.replace(/\r\n/g, "\n").replace(/\r/g, "\n")}`);
+          setInputFocusToken((token) => token + 1);
+        } else {
+          terminal.paste(text);
+        }
       }
-      terminal.focus();
+      focusInput();
     };
     host.addEventListener("contextmenu", handleTerminalContextMenu, { capture: true });
 
@@ -480,6 +546,12 @@ export function TerminalSurface({
     });
 
     const inputDisposable = terminal.onData((data) => {
+      if (shouldModernInputCapture(modernInputStateRef.current)) {
+        if (data === "\x03" || data === "\x04") {
+          window.wmux?.terminal.input({ id: sessionId, data });
+        }
+        return;
+      }
       window.wmux?.terminal.input({ id: sessionId, data });
     });
 
@@ -565,7 +637,7 @@ export function TerminalSurface({
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [copyBlock, cwd, focusBlockByOffset, fontSize, rerunBlock, sessionId, shell, surface.id, workspaceId]);
+  }, [copyBlock, cwd, focusBlockByOffset, focusInput, fontSize, rerunBlock, sessionId, shell, surface.id, workspaceId]);
 
   useEffect(() => {
     setBlocks([]);
@@ -616,6 +688,31 @@ export function TerminalSurface({
 
     return () => removeBlockListener?.();
   }, [surface.id]);
+
+  useEffect(() => {
+    setModernInputState(createModernInputState());
+    setInputDraft("");
+    const removeInputModeListener = window.wmux?.terminal.onInputMode?.((event: TerminalInputModeEvent) => {
+      if (event.surfaceId !== surface.id || event.sessionId !== sessionId) {
+        return;
+      }
+      if (event.type === "input:prompt-ready") {
+        dispatchModernInputEvent({ type: "prompt:ready" });
+        setInputFocusToken((token) => token + 1);
+        return;
+      }
+      if (event.type === "input:command-started") {
+        dispatchModernInputEvent({ type: "command:started" });
+        setInputDraft("");
+        return;
+      }
+      if (event.type === "input:alt-screen") {
+        dispatchModernInputEvent({ type: event.active ? "altScreen:enter" : "altScreen:leave" });
+      }
+    });
+
+    return () => removeInputModeListener?.();
+  }, [dispatchModernInputEvent, sessionId, surface.id]);
 
   const adjustFontSize = (delta: number): void => {
     setFontSize((currentFontSize) => {
@@ -684,6 +781,19 @@ export function TerminalSurface({
           onCopyBlock={copyBlock}
           onRerunBlock={rerunBlock}
         />
+        {isModernInputCaptured && (
+          <div className="terminalInputOverlay" onMouseDown={(event) => event.stopPropagation()}>
+            <InputEditor
+              value={inputDraft}
+              enabled={isModernInputCaptured}
+              focusToken={inputFocusToken}
+              onChange={setInputDraft}
+              onSubmit={submitInputDraft}
+              onInterrupt={interruptTerminal}
+              onToggleCapture={() => dispatchModernInputEvent({ type: "manualToggle" })}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

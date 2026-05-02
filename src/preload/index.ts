@@ -9,6 +9,7 @@ import type {
   SocketRpcResponse,
   SocketSecurityMode,
   SocketSecuritySettings,
+  TerminalInputModeEvent,
   TerminalNotificationPayload,
   WmuxProjectConfigResult,
   WorkspaceInspection
@@ -78,6 +79,11 @@ const api = {
       const listener = (_event: IpcRendererEvent, payload: BlockEvent): void => callback(payload);
       ipcRenderer.on("terminal:block", listener);
       return () => ipcRenderer.removeListener("terminal:block", listener);
+    },
+    onInputMode: (callback: (payload: TerminalInputModeEvent) => void): (() => void) => {
+      const listener = (_event: IpcRendererEvent, payload: TerminalInputModeEvent): void => callback(payload);
+      ipcRenderer.on("terminal:inputMode", listener);
+      return () => ipcRenderer.removeListener("terminal:inputMode", listener);
     }
   },
   browser: {

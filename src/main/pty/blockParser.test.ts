@@ -91,4 +91,56 @@ describe("parseTerminalBlocks", () => {
     expect(result.events[result.events.length - 1]).toMatchObject({ type: "block:end", exitCode: 1 });
     expect(state.currentBlock).toBeUndefined();
   });
+
+  it("在 OSC 133 B/C 之间发送现代输入模式事件", () => {
+    const state = createBlockParserState();
+    const result = parseTerminalBlocks(state, {
+      sessionId: "s",
+      surfaceId: "surface",
+      startLine: 0,
+      data: `${osc("133;A")}$ ${osc("133;B")}npm test${osc("133;C")}`
+    });
+
+    expect(result.inputModeEvents).toEqual([
+      { type: "input:prompt-ready", surfaceId: "surface", sessionId: "s", source: "osc133" },
+      { type: "input:command-started", surfaceId: "surface", sessionId: "s", command: "npm test" }
+    ]);
+  });
+
+  it("解析 alt-screen 进入/离开序列", () => {
+    const state = createBlockParserState();
+    const result = parseTerminalBlocks(state, {
+      sessionId: "s",
+      surfaceId: "surface",
+      startLine: 0,
+      data: "\x1b[?1049hvim\x1b[?1049l"
+    });
+
+    expect(result.cleaned).toBe("\x1b[?1049hvim\x1b[?1049l");
+    expect(result.inputModeEvents).toEqual([
+      { type: "input:alt-screen", surfaceId: "surface", sessionId: "s", active: true },
+      { type: "input:alt-screen", surfaceId: "surface", sessionId: "s", active: false }
+    ]);
+  });
+
+  it("支持跨 chunk 的 alt-screen 序列", () => {
+    const state = createBlockParserState();
+    const first = parseTerminalBlocks(state, {
+      sessionId: "s",
+      surfaceId: "surface",
+      startLine: 0,
+      data: "\x1b[?"
+    });
+    const second = parseTerminalBlocks(state, {
+      sessionId: "s",
+      surfaceId: "surface",
+      startLine: 0,
+      data: "1049h"
+    });
+
+    expect(first.inputModeEvents).toEqual([]);
+    expect(second.inputModeEvents).toEqual([
+      { type: "input:alt-screen", surfaceId: "surface", sessionId: "s", active: true }
+    ]);
+  });
 });

@@ -1149,6 +1149,29 @@ kbd {
   color: var(--text-primary);
 }
 
+.terminalInputOverlay {
+  position: absolute;
+  z-index: 4;
+  right: 10px;
+  bottom: 10px;
+  left: 10px;
+  border: 1px solid rgba(61, 174, 233, 0.46);
+  border-radius: var(--radius-md);
+  background: rgba(15, 18, 23, 0.96);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.36);
+}
+
+.inputEditorHost {
+  width: 100%;
+  min-height: 34px;
+  max-height: 160px;
+  overflow: hidden;
+}
+
+.inputEditorHost .cm-editor {
+  background: transparent;
+}
+
 .terminalHost .xterm-viewport {
   background: transparent !important;
   scrollbar-color: rgba(112, 121, 135, 0.34) transparent;

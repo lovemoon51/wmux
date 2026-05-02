@@ -256,6 +256,9 @@ export function registerPtyIpc(): void {
         for (const blockEvent of parsedBlocks.events) {
           sender.send("terminal:block", blockEvent);
         }
+        for (const inputModeEvent of parsedBlocks.inputModeEvents) {
+          sender.send("terminal:inputMode", inputModeEvent);
+        }
         for (const notification of notifications) {
           sender.send("terminal:notification", notification);
         }

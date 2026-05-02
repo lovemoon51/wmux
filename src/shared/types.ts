@@ -134,6 +134,11 @@ export type BlockEvent =
   | { type: "block:output"; surfaceId: string; blockId: BlockId; chunkBytes: number }
   | { type: "block:end"; surfaceId: string; blockId: BlockId; exitCode: number; endedAt: string };
 
+export type TerminalInputModeEvent =
+  | { type: "input:prompt-ready"; surfaceId: string; sessionId: string; source: "osc133" }
+  | { type: "input:command-started"; surfaceId: string; sessionId: string; command?: string }
+  | { type: "input:alt-screen"; surfaceId: string; sessionId: string; active: boolean };
+
 export type BlockListParams = {
   surfaceId?: string;
   limit?: number;

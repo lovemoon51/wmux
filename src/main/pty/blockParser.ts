@@ -1,10 +1,11 @@
-import type { Block, BlockEvent, BlockId } from "../../shared/types";
+import type { Block, BlockEvent, BlockId, TerminalInputModeEvent } from "../../shared/types";
 
 type ParserPhase = "idle" | "prompt" | "command" | "output";
 
 export type BlockParserState = {
   phase: ParserPhase;
   pendingOsc: string;
+  pendingCsi: string;
   currentBlock?: Block;
   commandBuffer: string;
   outputByteOffset: number;
@@ -25,6 +26,7 @@ export type BlockParserInput = {
 export type BlockParserResult = {
   cleaned: string;
   events: BlockEvent[];
+  inputModeEvents: TerminalInputModeEvent[];
 };
 
 const oscPrefix = "\x1b]";
@@ -35,6 +37,7 @@ export function createBlockParserState(): BlockParserState {
   return {
     phase: "idle",
     pendingOsc: "",
+    pendingCsi: "",
     commandBuffer: "",
     outputByteOffset: 0,
     nextBlockNumber: 1
@@ -43,6 +46,7 @@ export function createBlockParserState(): BlockParserState {
 
 export function parseTerminalBlocks(state: BlockParserState, input: BlockParserInput): BlockParserResult {
   const events: BlockEvent[] = [];
+  const inputModeEvents: TerminalInputModeEvent[] = [];
   const cleanedParts: string[] = [];
   const combined = `${state.pendingOsc}${input.data}`;
   state.pendingOsc = "";
@@ -51,11 +55,11 @@ export function parseTerminalBlocks(state: BlockParserState, input: BlockParserI
   while (index < combined.length) {
     const oscIndex = combined.indexOf(oscPrefix, index);
     if (oscIndex < 0) {
-      appendCleanedText(state, combined.slice(index), cleanedParts, events, input);
+      appendCleanedText(state, combined.slice(index), cleanedParts, events, input, inputModeEvents);
       break;
     }
 
-    appendCleanedText(state, combined.slice(index, oscIndex), cleanedParts, events, input);
+    appendCleanedText(state, combined.slice(index, oscIndex), cleanedParts, events, input, inputModeEvents);
     const terminator = findOscTerminator(combined, oscIndex + oscPrefix.length);
     if (!terminator) {
       state.pendingOsc = combined.slice(oscIndex);
@@ -63,7 +67,7 @@ export function parseTerminalBlocks(state: BlockParserState, input: BlockParserI
     }
 
     const payload = combined.slice(oscIndex + oscPrefix.length, terminator.index);
-    const handled = handleOscPayload(state, payload, events, input);
+    const handled = handleOscPayload(state, payload, events, inputModeEvents, input);
     if (!handled) {
       cleanedParts.push(combined.slice(oscIndex, terminator.endIndex));
     }
@@ -72,7 +76,8 @@ export function parseTerminalBlocks(state: BlockParserState, input: BlockParserI
 
   return {
     cleaned: cleanedParts.join(""),
-    events
+    events,
+    inputModeEvents
   };
 }
 
@@ -81,20 +86,22 @@ function appendCleanedText(
   text: string,
   cleanedParts: string[],
   events: BlockEvent[],
-  input: BlockParserInput
+  input: BlockParserInput,
+  inputModeEvents: TerminalInputModeEvent[]
 ): void {
   if (!text) {
     return;
   }
-  cleanedParts.push(text);
+  const csiText = consumeAltScreenSequences(state, text, inputModeEvents, input);
+  cleanedParts.push(csiText);
 
   if (state.phase === "command") {
-    state.commandBuffer += text;
+    state.commandBuffer += csiText;
     return;
   }
 
   if (state.phase === "output" && state.currentBlock) {
-    const chunkBytes = Buffer.byteLength(text, "utf8");
+    const chunkBytes = Buffer.byteLength(csiText, "utf8");
     state.outputByteOffset += chunkBytes;
     events.push({
       type: "block:output",
@@ -109,6 +116,7 @@ function handleOscPayload(
   state: BlockParserState,
   payload: string,
   events: BlockEvent[],
+  inputModeEvents: TerminalInputModeEvent[],
   input: BlockParserInput
 ): boolean {
   const parts = payload.split(";");
@@ -124,10 +132,22 @@ function handleOscPayload(
   if (marker === "B") {
     state.phase = "command";
     state.commandBuffer = "";
+    inputModeEvents.push({
+      type: "input:prompt-ready",
+      surfaceId: input.surfaceId,
+      sessionId: input.sessionId,
+      source: "osc133"
+    });
     return true;
   }
   if (marker === "C") {
-    commitCommand(state, events, input);
+    const command = commitCommand(state, events, input);
+    inputModeEvents.push({
+      type: "input:command-started",
+      surfaceId: input.surfaceId,
+      sessionId: input.sessionId,
+      command
+    });
     state.phase = "output";
     return true;
   }
@@ -160,10 +180,10 @@ function startBlock(state: BlockParserState, events: BlockEvent[], input: BlockP
   events.push({ type: "block:start", surfaceId: input.surfaceId, block: { ...block } });
 }
 
-function commitCommand(state: BlockParserState, events: BlockEvent[], input: BlockParserInput): void {
+function commitCommand(state: BlockParserState, events: BlockEvent[], input: BlockParserInput): string {
   const block = state.currentBlock;
   if (!block) {
-    return;
+    return "";
   }
   const command = normalizeCommandText(state.commandBuffer);
   block.command = command;
@@ -173,6 +193,7 @@ function commitCommand(state: BlockParserState, events: BlockEvent[], input: Blo
     blockId: block.id,
     command
   });
+  return command;
 }
 
 function endBlock(
@@ -228,6 +249,55 @@ function readExitCode(value: string | undefined): number {
 function normalizeCommandText(value: string): string {
   // eslint-disable-next-line no-control-regex
   return value.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").replace(/[\r\n]+/g, " ").trim();
+}
+
+const altScreenEnter = "\x1b[?1049h";
+const altScreenLeave = "\x1b[?1049l";
+// eslint-disable-next-line no-control-regex
+const altScreenPattern = /\x1b\[\?1049([hl])/g;
+
+function consumeAltScreenSequences(
+  state: BlockParserState,
+  text: string,
+  inputModeEvents: TerminalInputModeEvent[],
+  input: BlockParserInput
+): string {
+  const combined = `${state.pendingCsi}${text}`;
+  state.pendingCsi = "";
+  const pending = readTrailingAltScreenPrefix(combined);
+  const completeText = pending ? combined.slice(0, -pending.length) : combined;
+  state.pendingCsi = pending;
+  emitAltScreenEvents(completeText, inputModeEvents, input);
+  return completeText;
+}
+
+function emitAltScreenEvents(
+  text: string,
+  inputModeEvents: TerminalInputModeEvent[],
+  input: BlockParserInput
+): void {
+  for (const match of text.matchAll(altScreenPattern)) {
+    inputModeEvents.push({
+      type: "input:alt-screen",
+      surfaceId: input.surfaceId,
+      sessionId: input.sessionId,
+      active: match[1] === "h"
+    });
+  }
+}
+
+function readTrailingAltScreenPrefix(value: string): string {
+  const candidates = [altScreenEnter, altScreenLeave];
+  let longest = "";
+  for (const candidate of candidates) {
+    for (let length = 1; length < candidate.length; length += 1) {
+      const prefix = candidate.slice(0, length);
+      if (value.endsWith(prefix) && prefix.length > longest.length) {
+        longest = prefix;
+      }
+    }
+  }
+  return longest;
 }
 
 function createBlockId(sessionId: string, blockNumber: number): BlockId {
