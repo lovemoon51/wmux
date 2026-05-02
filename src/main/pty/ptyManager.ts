@@ -154,6 +154,23 @@ export function registerPtyIpc(): void {
         }
       });
 
+      // 跨重启 scrollback：上一会话的输出在 hydrate 阶段进了 outputBuffers，
+      // 这里检查到 → 一次性回放给 renderer 并清空，让新 pty 数据从 0 开始累积。
+      // 用分隔横幅区分"历史"与"新会话"，避免用户误以为旧 prompt 还活着。
+      const persistedReplay = outputBuffers.get(payload.id);
+      if (persistedReplay) {
+        outputBuffers.delete(payload.id);
+        if (!event.sender.isDestroyed()) {
+          event.sender.send("terminal:data", {
+            id: payload.id,
+            data:
+              `\x1b[0m\r\n\x1b[2m── wmux scrollback from previous session ──\x1b[0m\r\n` +
+              `${persistedReplay}\r\n` +
+              `\x1b[2m── new session ──\x1b[0m\r\n\r\n`
+          });
+        }
+      }
+
       const session: TerminalSession = {
         id: payload.id,
         pty,
@@ -229,6 +246,19 @@ export function registerPtyIpc(): void {
   ipcMain.on("terminal:dispose", (_event, payload: { id: string }) => {
     disposeTerminal(payload.id);
   });
+}
+
+// 跨重启持久化：main/index.ts 在 app ready 与 before-quit 时调用
+export function hydrateOutputBuffersFromState(state: Map<string, string>): void {
+  for (const [id, value] of state) {
+    if (typeof value === "string" && value.length > 0) {
+      outputBuffers.set(id, value);
+    }
+  }
+}
+
+export function snapshotOutputBuffers(): Map<string, string> {
+  return new Map(outputBuffers);
 }
 
 function disposeTerminal(id: string): void {

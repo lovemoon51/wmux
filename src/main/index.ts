@@ -1,12 +1,17 @@
 import { app, BrowserWindow, ipcMain, nativeTheme, shell } from "electron";
 import { randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { registerPtyIpc } from "./pty/ptyManager";
+import { hydrateOutputBuffersFromState, snapshotOutputBuffers } from "./pty/ptyManager";
+import {
+  deserializeOutputBuffers,
+  serializeOutputBuffers
+} from "./pty/outputBufferPersistence";
 import { registerAppUpdater } from "./appUpdater";
 import {
   createRpcError,
@@ -63,6 +68,33 @@ process.env.WMUX_SECURITY_MODE = socketSecurityMode;
 
 function getStatePath(): string {
   return join(app.getPath("userData"), "workspace-state.json");
+}
+
+function getScrollbackPath(): string {
+  return join(app.getPath("userData"), "terminal-scrollback.json");
+}
+
+async function hydrateScrollbackFromDisk(): Promise<void> {
+  try {
+    const raw = await readFile(getScrollbackPath(), "utf8");
+    const state = deserializeOutputBuffers(raw);
+    if (state.size > 0) {
+      hydrateOutputBuffersFromState(state);
+    }
+  } catch {
+    // 缺文件 / JSON 损坏 / 权限问题：deserialize 已经做兜底返回空 Map，
+    // 这里只关心读不到时不污染 outputBuffers
+  }
+}
+
+function persistScrollbackToDisk(): void {
+  try {
+    const json = serializeOutputBuffers(snapshotOutputBuffers());
+    // 同步写：before-quit 退出窗口很短，异步写很可能赶不上 process exit
+    writeFileSync(getScrollbackPath(), json, { encoding: "utf8" });
+  } catch {
+    // 退出阶段任何失败都吞掉，保证用户感知不到延迟
+  }
 }
 
 function getSettingsPath(): string {
@@ -714,6 +746,11 @@ app.whenReady().then(() => {
   );
   registerPtyIpc();
   registerSocketBridgeIpc();
+
+  // 跨重启 scrollback 持久化：在 IPC 注册后立即 hydrate，保证终端 surface
+  // 第一次 create 时 outputBuffers 已含上次会话尾段，触发分隔横幅 + 历史回放
+  void hydrateScrollbackFromDisk();
+
   if (socketSecurityMode === "off") {
     console.warn("WMUX_SECURITY_MODE=off: socket server disabled.");
   } else {
@@ -746,6 +783,8 @@ app.on("before-quit", () => {
   });
   pendingRendererRequests.clear();
   void socketRpcServer?.close();
+  // 终端 scrollback 持久化：尽力写盘，失败静默吞掉避免阻塞退出
+  persistScrollbackToDisk();
 });
 
 app.on("window-all-closed", () => {
