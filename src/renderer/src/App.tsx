@@ -95,6 +95,7 @@ import type {
   TerminalNotificationPayload
 } from "@shared/types";
 import { getWorkspaceUnreadCount } from "./lib/workspaceUnread";
+import { detectTerminalAttentionPrompt } from "./lib/terminalAttention";
 import {
   isWorkspaceStatus,
   statusClass,
@@ -167,11 +168,6 @@ type PendingProjectCommandConfirmation = {
   command: WmuxCommandConfig;
   reason: "trust" | "restart";
   existingWorkspaceId?: string;
-};
-
-type TerminalAttentionPrompt = {
-  marker: string;
-  message: string;
 };
 
 type BrowserSurfaceTarget = {
@@ -421,26 +417,9 @@ function createWorkspace(options: { name?: string; cwd?: string } = {}): Workspa
   };
 }
 
-const terminalControlSequencePattern = /\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))/g;
-const terminalAttentionPrompts: TerminalAttentionPrompt[] = [
-  {
-    marker: "would you like to run the following command?",
-    message: "Agent is waiting for command approval"
-  },
-  {
-    marker: "press enter to confirm or esc to cancel",
-    message: "Agent is waiting for confirmation"
-  }
-];
-
 // 未读数 = recentEvents 中事件时间晚于 lastViewedAt 的条目数；缺 lastViewedAt 视为全部未读
 // 注意：recentEvents 上限 maxWorkspaceStatusEvents（4），未读 badge 因此实际范围 0..4
 // 实现已抽取到 src/renderer/src/lib/workspaceUnread.ts 以便单元测试
-
-function detectTerminalAttentionPrompt(output: string): TerminalAttentionPrompt | undefined {
-  const normalizedOutput = output.replace(terminalControlSequencePattern, "").replace(/\r/g, "\n").toLowerCase();
-  return terminalAttentionPrompts.find((prompt) => normalizedOutput.includes(prompt.marker));
-}
 
 const socketSecurityModeLabels: Record<SocketSecurityMode, string> = {
   off: "Off",
