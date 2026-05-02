@@ -12,6 +12,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  ScrollText,
   Search,
   Settings,
   SplitSquareHorizontal,
@@ -117,7 +118,15 @@ import {
   statusLabels,
   withWorkspaceStatusEvent
 } from "./lib/workspaceStatusEvents";
-import { TerminalSurface, setTerminalSearchHandlers } from "./components/TerminalSurface";
+import { TerminalSurface, setTerminalSearchHandlers, writeTerminalInputDraft } from "./components/TerminalSurface";
+import {
+  createWorkflowArgDefaults,
+  getWorkflowCommandTemplate,
+  isWorkflowCommand,
+  renderWorkflowCommand,
+  validateWorkflowArgs
+} from "./lib/workflowTemplate";
+import { ArgsPromptDialog } from "./components/ArgsPromptDialog";
 
 let nextSurfaceNumber = 1;
 let nextWorkspaceNumber = 1;
@@ -183,6 +192,11 @@ type PendingProjectCommandConfirmation = {
   command: WmuxCommandConfig;
   reason: "trust" | "restart";
   existingWorkspaceId?: string;
+};
+
+type PendingWorkflowCommand = {
+  command: WmuxCommandConfig;
+  values: Record<string, string>;
 };
 
 type BrowserSurfaceTarget = {
@@ -2058,6 +2072,7 @@ export function App(): ReactElement {
   const [trustedCommandConfigPaths, setTrustedCommandConfigPaths] = useState<string[]>([]);
   const [pendingCommandConfirmation, setPendingCommandConfirmation] =
     useState<PendingProjectCommandConfirmation | null>(null);
+  const [pendingWorkflowCommand, setPendingWorkflowCommand] = useState<PendingWorkflowCommand | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [securitySettings, setSecuritySettings] = useState<SocketSecuritySettings | null>(null);
@@ -2212,7 +2227,11 @@ export function App(): ReactElement {
         ?.filter((source) => source.found)
         .map((source) => {
           const label =
-            source.kind === "global" ? "全局" : source.path.replace(/\\/g, "/").endsWith(".cmux/cmux.json") ? "项目 .cmux" : "项目";
+            source.kind === "global"
+              ? "全局"
+              : source.kind === "workflow"
+                ? "Workflow"
+                : source.path.replace(/\\/g, "/").endsWith(".cmux/cmux.json") ? "项目 .cmux" : "项目";
           return `${label} ${source.commandCount}`;
         })
         .join(" / ") || "项目"}）`
@@ -2375,6 +2394,10 @@ export function App(): ReactElement {
     setCommandPaletteOpen(false);
     setCommandQuery("");
     setSelectedCommandIndex(0);
+  };
+
+  const closeWorkflowPrompt = (): void => {
+    setPendingWorkflowCommand(null);
   };
 
   // FindBar：注册 SearchAddon、打开/关闭、上一个/下一个匹配
@@ -2683,7 +2706,88 @@ export function App(): ReactElement {
     buildAndAddWorkspaceCommand(command);
   };
 
+  const writeCommandToActiveTerminalDraft = (commandText: string, commandName: string): boolean => {
+    const terminalSurface = getActiveTerminalSurface(activeWorkspace);
+    if (!terminalSurface) {
+      updateActiveWorkspace((workspace) => ({
+        ...workspace,
+        status: "attention",
+        notice: `没有可写入的终端：${commandName}`
+      }));
+      return false;
+    }
+
+    if (writeTerminalInputDraft(terminalSurface.id, commandText)) {
+      updateActiveWorkspace((workspace) => ({
+        ...workspace,
+        status: "attention",
+        notice: `已写入命令：${commandName}`
+      }));
+      return true;
+    }
+
+    window.wmux?.terminal.input({
+      id: `${terminalSurface.id}:${shellProfileRef.current}`,
+      data: commandText
+    });
+    updateActiveWorkspace((workspace) => ({
+      ...workspace,
+      status: "attention",
+      notice: `已写入命令：${commandName}`
+    }));
+    return true;
+  };
+
+  const openWorkflowPrompt = (command: WmuxCommandConfig): void => {
+    setPendingWorkflowCommand({
+      command,
+      values: createWorkflowArgDefaults(command.args)
+    });
+  };
+
+  const updateWorkflowArgValue = (name: string, value: string): void => {
+    setPendingWorkflowCommand((pendingCommand) =>
+      pendingCommand
+        ? {
+            ...pendingCommand,
+            values: {
+              ...pendingCommand.values,
+              [name]: value
+            }
+          }
+        : pendingCommand
+    );
+  };
+
+  const confirmWorkflowCommand = (): void => {
+    const pendingCommand = pendingWorkflowCommand;
+    if (!pendingCommand) {
+      return;
+    }
+
+    const template = getWorkflowCommandTemplate(pendingCommand.command);
+    if (!template) {
+      setPendingWorkflowCommand(null);
+      return;
+    }
+
+    const validation = validateWorkflowArgs(pendingCommand.command.args, pendingCommand.values, template);
+    if (!validation.ok) {
+      return;
+    }
+
+    const renderedCommand = renderWorkflowCommand(template, pendingCommand.values);
+    if (writeCommandToActiveTerminalDraft(renderedCommand, pendingCommand.command.name)) {
+      setPendingWorkflowCommand(null);
+      closeCommandPalette();
+    }
+  };
+
   const executeProjectCommand = (command: WmuxCommandConfig): void => {
+    if (isWorkflowCommand(command)) {
+      openWorkflowPrompt(command);
+      return;
+    }
     if (command.workspace) {
       runWorkspaceCommand(command);
     } else {
@@ -2857,15 +2961,33 @@ export function App(): ReactElement {
           ]
         : []),
       ...projectCommands.map(
-        (command): PaletteCommand => ({
-          id: `project:${command.sourcePath ?? projectConfig?.path ?? "wmux.json"}:${command.name}`,
-          category: "project",
-          title: command.name,
-          subtitle: command.description ?? command.command ?? command.workspace?.name ?? "项目自定义命令",
-          keywords: [command.name, command.description ?? "", command.command ?? "", ...(command.keywords ?? [])],
-          icon: command.workspace ? "workspace" : "terminal",
-          run: () => runProjectCommand(command)
-        })
+        (command): PaletteCommand => {
+          const workflow = isWorkflowCommand(command);
+          const commandText = getWorkflowCommandTemplate(command);
+          return {
+            id: `project:${command.sourcePath ?? projectConfig?.path ?? "wmux.json"}:${command.name}`,
+            category: workflow ? "workflow" : "project",
+            title: command.name,
+            subtitle: command.description ?? commandText ?? command.workspace?.name ?? "项目自定义命令",
+            keywords: [
+              command.name,
+              command.description ?? "",
+              command.command ?? "",
+              command.commandTemplate ?? "",
+              ...(command.args?.map((arg) => arg.name) ?? []),
+              ...(command.keywords ?? [])
+            ],
+            icon: workflow ? "workflow" : command.workspace ? "workspace" : "terminal",
+            args: command.args?.map((arg) => ({
+              name: arg.name,
+              description: arg.description,
+              default: arg.default,
+              required: arg.required,
+              options: arg.enum
+            })),
+            run: () => runProjectCommand(command)
+          };
+        }
       ),
       ...blockCommands,
       {
@@ -4189,7 +4311,7 @@ export function App(): ReactElement {
     setPaletteRecentUsage(nextUsage);
     paletteRecentUsageRef.current = nextUsage;
     void Promise.resolve(command.run()).finally(() => {
-      if (!command.id.startsWith("project:")) {
+      if (!command.id.startsWith("project:") || command.category === "workflow") {
         closeCommandPalette();
       }
     });
@@ -4399,6 +4521,13 @@ export function App(): ReactElement {
         onCancel={() => setPendingCommandConfirmation(null)}
         onConfirm={confirmProjectCommand}
       />
+      <ArgsPromptDialog
+        command={pendingWorkflowCommand?.command ?? null}
+        values={pendingWorkflowCommand?.values ?? {}}
+        onCancel={closeWorkflowPrompt}
+        onConfirm={confirmWorkflowCommand}
+        onValueChange={updateWorkflowArgValue}
+      />
     </main>
   );
 }
@@ -4566,6 +4695,8 @@ function CommandPalette({
                         <Settings size={16} />
                       ) : command.category === "block" ? (
                         <Activity size={16} />
+                      ) : command.category === "workflow" || command.icon === "workflow" ? (
+                        <ScrollText size={16} />
                       ) : command.icon === "workspace" ? (
                         <LayoutGrid size={16} />
                       ) : (

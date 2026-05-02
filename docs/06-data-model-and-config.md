@@ -11,6 +11,8 @@ Global Windows: %APPDATA%/wmux/wmux.json
 
 项目配置优先于全局配置。同名 command 由项目配置覆盖。项目根目录存在 `wmux.json` 时只读取它；不存在时才读取 `.cmux/cmux.json` 作为 cmux 兼容入口。两者使用同一套 schema，不引入并行配置模型。
 
+项目根目录的 `.warp/workflows/*.yaml` 与 `.warp/workflows/*.yml` 会被自动加载并合并到命令列表，作为 `workflow` 来源展示。同名 workflow 会随项目 commands 一起覆盖全局 command；若 workflow 与 `wmux.json` command 同名，后加载的 workflow 会覆盖同名项目命令。
+
 ## 2. `wmux.json` Schema 草案
 
 ```json
@@ -77,10 +79,62 @@ Global Windows: %APPDATA%/wmux/wmux.json
       "name": "Run Tests",
       "command": "npm test",
       "confirm": true
+    },
+    {
+      "name": "Git Rebase",
+      "description": "Prepare a rebase command and let the user review it before running",
+      "commandTemplate": "git rebase {{base}} {{branch}}",
+      "args": [
+        {
+          "name": "base",
+          "description": "Base branch",
+          "default": "main",
+          "required": true
+        },
+        {
+          "name": "branch",
+          "description": "Topic branch",
+          "required": true
+        }
+      ]
     }
   ]
 }
 ```
+
+`command` 保持向后兼容：无参数命令仍会直接写入终端并执行。`commandTemplate` 用于参数化命令，优先于 `command`，模板变量格式为 `{{name}}`。配置带 `args` 或 `commandTemplate` 时会作为 Workflow 出现在命令面板，提交参数后只写入当前终端输入草稿，不会自动追加换行或执行。
+
+`args` 字段元素结构：
+
+```ts
+type WmuxCommandArg = {
+  name: string;
+  description?: string;
+  default?: string;
+  required?: boolean;
+  enum?: string[];
+};
+```
+
+`enum` 会在参数表单中渲染为静态候选项。`.cmux/cmux.json` 复用同一 schema。
+
+Warp YAML workflow 映射：
+
+```yaml
+name: Git Rebase
+command: git rebase {{base}} {{branch}}
+tags:
+  - git
+description: Prepare a rebase command
+arguments:
+  - name: base
+    description: Base branch
+    default_value: main
+  - name: branch
+    description: Topic branch
+```
+
+`name` 映射到 command 名称，`command` 映射到 `commandTemplate`，`tags` 映射到 `keywords`，`arguments[].default_value` 映射到 `args[].default`。没有默认值的 YAML argument 在 wmux 中按 required 处理。
 
 ## 3. SQLite 表
 

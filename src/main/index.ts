@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { registerPtyIpc } from "./pty/ptyManager";
 import { hydrateBlocksFromState, hydrateOutputBuffersFromState, snapshotBlocks, snapshotOutputBuffers } from "./pty/ptyManager";
 import { registerCompletionIpc } from "./ipc/completionBridge";
+import { loadWorkflowYamlDirectory } from "./config/workflowYamlLoader";
 import {
   deserializePersistedBlocks,
   deserializeOutputBuffers,
@@ -31,6 +32,7 @@ import type {
   SocketRpcRequest,
   SocketRpcResponse,
   WmuxCommandConfig,
+  WmuxCommandArg,
   WmuxConfigSource,
   WmuxConfigSourceKind,
   WmuxLayoutConfig,
@@ -194,6 +196,47 @@ function readOptionalKeywords(record: Record<string, unknown>): string[] | undef
     .map((item) => item.trim());
 }
 
+function parseCommandArgConfig(value: unknown, errors: string[], context: string): WmuxCommandArg | null {
+  if (!isRecord(value)) {
+    errors.push(`${context} 必须是参数对象`);
+    return null;
+  }
+
+  const name = readOptionalString(value, "name");
+  if (!name) {
+    errors.push(`${context}.name 必须是非空字符串`);
+    return null;
+  }
+
+  const enumValues = Array.isArray(value.enum)
+    ? value.enum.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
+    : undefined;
+
+  return {
+    name,
+    description: readOptionalString(value, "description"),
+    default: readOptionalString(value, "default"),
+    required: readOptionalBoolean(value, "required"),
+    enum: enumValues?.length ? enumValues : undefined
+  };
+}
+
+function parseCommandArgsConfig(value: unknown, errors: string[], context: string): WmuxCommandArg[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    errors.push(`${context} 必须是参数数组`);
+    return undefined;
+  }
+
+  const args = value
+    .map((arg, index) => parseCommandArgConfig(arg, errors, `${context}[${index}]`))
+    .filter((arg): arg is WmuxCommandArg => Boolean(arg));
+
+  return args.length ? args : undefined;
+}
+
 function parseSurfaceConfig(value: unknown, errors: string[], context: string): WmuxSurfaceConfig | null {
   if (!isRecord(value)) {
     errors.push(`${context} 必须是 surface 对象`);
@@ -310,9 +353,11 @@ function parseCommandConfig(
   }
 
   const commandText = readOptionalString(value, "command");
+  const commandTemplate = readOptionalString(value, "commandTemplate");
+  const args = parseCommandArgsConfig(value.args, errors, `${context}.args`);
   const workspace = value.workspace === undefined ? undefined : parseWorkspaceCommandConfig(value.workspace, errors, `${context}.workspace`);
-  if (!commandText && !workspace) {
-    errors.push(`${context} 必须提供 command 或 workspace`);
+  if (!commandText && !commandTemplate && !workspace) {
+    errors.push(`${context} 必须提供 command、commandTemplate 或 workspace`);
     return null;
   }
 
@@ -323,6 +368,8 @@ function parseCommandConfig(
     restart:
       value.restart === "ignore" || value.restart === "recreate" || value.restart === "confirm" ? value.restart : undefined,
     command: commandText,
+    commandTemplate,
+    args,
     confirm: readOptionalBoolean(value, "confirm"),
     workspace: workspace ?? undefined,
     source: source.kind,
@@ -579,8 +626,18 @@ async function loadProjectConfig(): Promise<WmuxProjectConfigResult> {
     ? undefined
     : await readWmuxConfigSource("project", cmuxProjectConfigPath);
   const selectedProjectResult = projectResult.source.found ? projectResult : cmuxProjectResult;
-  const sources = [globalResult.source, projectResult.source, ...(cmuxProjectResult ? [cmuxProjectResult.source] : [])];
-  const commands = mergeWmuxCommands(globalResult.config.commands, selectedProjectResult?.config.commands ?? []);
+  const workflowResults = await loadWorkflowYamlDirectory(process.cwd());
+  const sources = [
+    globalResult.source,
+    projectResult.source,
+    ...(cmuxProjectResult ? [cmuxProjectResult.source] : []),
+    ...workflowResults.map((result) => result.source)
+  ];
+  const projectCommands = [
+    ...(selectedProjectResult?.config.commands ?? []),
+    ...workflowResults.flatMap((result) => result.commands)
+  ];
+  const commands = mergeWmuxCommands(globalResult.config.commands, projectCommands);
 
   return {
     path: selectedProjectResult?.source.found ? selectedProjectResult.source.path : projectConfigPath,

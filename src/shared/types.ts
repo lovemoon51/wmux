@@ -13,7 +13,7 @@ export type SocketSecuritySettings = {
   warning?: string;
 };
 
-export type WmuxConfigSourceKind = "global" | "project";
+export type WmuxConfigSourceKind = "global" | "project" | "workflow";
 
 export type WmuxSurfaceConfig =
   | {
@@ -50,12 +50,34 @@ export type WmuxWorkspaceCommandConfig = {
   layout?: WmuxLayoutConfig;
 };
 
+export type WmuxCommandArg = {
+  name: string;
+  description?: string;
+  default?: string;
+  required?: boolean;
+  enum?: string[];
+};
+
+export type WmuxWorkflowConfig = {
+  name: string;
+  command: string;
+  description?: string;
+  tags?: string[];
+  arguments?: Array<{
+    name: string;
+    description?: string;
+    default_value?: string;
+  }>;
+};
+
 export type WmuxCommandConfig = {
   name: string;
   description?: string;
   keywords?: string[];
   restart?: "ignore" | "recreate" | "confirm";
   command?: string;
+  commandTemplate?: string;
+  args?: WmuxCommandArg[];
   confirm?: boolean;
   workspace?: WmuxWorkspaceCommandConfig;
   source?: WmuxConfigSourceKind;

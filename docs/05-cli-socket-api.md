@@ -179,6 +179,8 @@ wmux browser storage set --key wmux_local --value updated --surface surface:3
 | `browser.storage.get` | `{ surfaceId?, paneId?, workspaceId?, active?, area?, key }` | storage value |
 | `browser.storage.set` | `{ surfaceId?, paneId?, workspaceId?, active?, area?, key, value }` | ok |
 
+`config.list` 返回的 `commands` 保持兼容旧 `command` 字段；参数化 Workflow 命令会额外包含 `commandTemplate` 与 `args`。项目根目录 `.warp/workflows/*.yaml` 会作为 `workflow` 来源合并进命令列表。通过 `palette.run` 触发这类命令时，renderer 会打开参数表单并把渲染结果写入当前终端输入草稿，不会直接执行。
+
 ## 7. 错误码
 
 ```text

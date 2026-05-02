@@ -156,6 +156,12 @@ kbd {
   opacity: 0.42;
 }
 
+.commandButton:disabled,
+.toolbarButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
 .workspaceList {
   display: flex;
   min-height: 0;
@@ -1552,6 +1558,100 @@ kbd {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.argsPromptDialog {
+  display: grid;
+  width: min(560px, calc(100vw - 40px));
+  gap: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: #171b21;
+  box-shadow: var(--shadow-lg);
+  padding: 16px;
+}
+
+.argsPromptDialog p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.argsPromptFields {
+  display: grid;
+  gap: 11px;
+}
+
+.argsPromptField {
+  display: grid;
+  gap: 6px;
+}
+
+.argsPromptLabel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.argsPromptRequired {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.argsPromptField input,
+.argsPromptField select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  outline: 0;
+  background: var(--bg-control);
+  color: var(--text-primary);
+  font: inherit;
+  padding: 0 10px;
+}
+
+.argsPromptField input:focus,
+.argsPromptField select:focus {
+  border-color: var(--accent);
+}
+
+.argsPromptHint,
+.argsPromptError {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.argsPromptError {
+  color: var(--danger);
+}
+
+.argsPromptPreview {
+  overflow: auto;
+  max-height: 132px;
+  margin: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: #11161d;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.argsPromptStatus {
+  color: var(--text-muted);
+  font-size: 11px;
+  min-height: 14px;
 }
 
 @media (max-width: 1280px) {

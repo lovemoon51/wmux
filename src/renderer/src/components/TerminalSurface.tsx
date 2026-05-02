@@ -29,10 +29,15 @@ type TerminalSearchHandlers = {
   onRequestFind?: (surfaceId: string) => void;
 };
 const terminalSearchHandlers: TerminalSearchHandlers = {};
+const terminalInputDraftHandlers = new Map<string, (text: string) => boolean>();
 
 export function setTerminalSearchHandlers(handlers: TerminalSearchHandlers): void {
   terminalSearchHandlers.onSearchReady = handlers.onSearchReady;
   terminalSearchHandlers.onRequestFind = handlers.onRequestFind;
+}
+
+export function writeTerminalInputDraft(surfaceId: string, text: string): boolean {
+  return terminalInputDraftHandlers.get(surfaceId)?.(text) ?? false;
 }
 
 // URL 识别正则：兼容 smoke dispatchEvent 模拟点击的 DOM 路径
@@ -171,6 +176,23 @@ export function TerminalSurface({
   const dispatchModernInputEvent = useCallback((event: Parameters<typeof reduceModernInputState>[1]): void => {
     setModernInputState((currentState) => reduceModernInputState(currentState, event));
   }, []);
+
+  const setInputDraftAndFocus = useCallback((text: string): boolean => {
+    if (!shouldModernInputCapture(modernInputStateRef.current)) {
+      return false;
+    }
+    setInputDraft(text);
+    inputDraftRef.current = text;
+    setInputFocusToken((token) => token + 1);
+    return true;
+  }, []);
+
+  useEffect(() => {
+    terminalInputDraftHandlers.set(surface.id, setInputDraftAndFocus);
+    return () => {
+      terminalInputDraftHandlers.delete(surface.id);
+    };
+  }, [setInputDraftAndFocus, surface.id]);
 
   const focusInput = useCallback((): void => {
     if (shouldModernInputCapture(modernInputStateRef.current)) {

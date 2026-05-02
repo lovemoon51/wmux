@@ -75,6 +75,24 @@ wmux clear-status
 项目命令默认读取仓库根目录的 `wmux.json`。为兼容 cmux 项目，若 `wmux.json` 不存在，wmux 会读取 `.cmux/cmux.json`，并复用同一套 command/workspace layout schema。
 可用 `wmux config --json` 查看当前加载的全局/项目配置来源和命令清单。
 
+`commands` 支持参数化 workflow：使用 `commandTemplate` 和 `args` 后，命令面板会先打开参数表单，确认后把渲染出的命令写入当前终端输入行，由用户再按 Enter 执行。
+项目根目录 `.warp/workflows/*.yaml` 也会自动加载，支持 Warp 的 `name`、`command`、`tags`、`description`、`arguments[].name/description/default_value` 字段。
+
+```json
+{
+  "commands": [
+    {
+      "name": "Git Rebase",
+      "commandTemplate": "git rebase {{base}} {{branch}}",
+      "args": [
+        { "name": "base", "default": "main", "required": true },
+        { "name": "branch", "required": true }
+      ]
+    }
+  ]
+}
+```
+
 ## Terminal Link
 
 wmux terminal 中出现的 `http://` / `https://` 链接可以点击打开到当前 workspace 的内置 browser surface。若当前 workspace 没有可用 browser surface，wmux 会在当前 pane 创建一个。
