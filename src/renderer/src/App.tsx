@@ -91,12 +91,16 @@ import type {
   WorkspaceListParams,
   WorkspaceRenameParams,
   WorkspaceSelectParams,
-  WorkspaceStatus,
-  WorkspaceStatusEvent,
   WorkspaceSummary,
   TerminalNotificationPayload
 } from "@shared/types";
 import { getWorkspaceUnreadCount } from "./lib/workspaceUnread";
+import {
+  isWorkspaceStatus,
+  statusClass,
+  statusLabels,
+  withWorkspaceStatusEvent
+} from "./lib/workspaceStatusEvents";
 import { TerminalSurface, setTerminalSearchHandlers } from "./components/TerminalSurface";
 
 let nextSurfaceNumber = 1;
@@ -163,11 +167,6 @@ type PendingProjectCommandConfirmation = {
   command: WmuxCommandConfig;
   reason: "trust" | "restart";
   existingWorkspaceId?: string;
-};
-
-type WorkspaceStatusEventInput = {
-  status: WorkspaceStatus;
-  message?: string;
 };
 
 type TerminalAttentionPrompt = {
@@ -422,16 +421,6 @@ function createWorkspace(options: { name?: string; cwd?: string } = {}): Workspa
   };
 }
 
-const statusLabels: Record<WorkspaceStatus, string> = {
-  idle: "Idle",
-  running: "Running",
-  attention: "Needs input",
-  success: "Done",
-  error: "Error"
-};
-
-const workspaceStatusValues: WorkspaceStatus[] = ["idle", "running", "attention", "success", "error"];
-const maxWorkspaceStatusEvents = 4;
 const terminalControlSequencePattern = /\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))/g;
 const terminalAttentionPrompts: TerminalAttentionPrompt[] = [
   {
@@ -444,36 +433,6 @@ const terminalAttentionPrompts: TerminalAttentionPrompt[] = [
   }
 ];
 
-function isWorkspaceStatus(value: unknown): value is WorkspaceStatus {
-  return typeof value === "string" && workspaceStatusValues.includes(value as WorkspaceStatus);
-}
-
-function createWorkspaceStatusEvent(input: WorkspaceStatusEventInput): WorkspaceStatusEvent | undefined {
-  const message = input.message?.trim();
-  if (!message) {
-    return undefined;
-  }
-
-  return {
-    id: `event-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    at: new Date().toISOString(),
-    status: input.status,
-    message
-  };
-}
-
-function withWorkspaceStatusEvent(workspace: Workspace, input: WorkspaceStatusEventInput): Workspace {
-  const event = createWorkspaceStatusEvent(input);
-  if (!event) {
-    return workspace;
-  }
-
-  return {
-    ...workspace,
-    recentEvents: [event, ...(workspace.recentEvents ?? [])].slice(0, maxWorkspaceStatusEvents)
-  };
-}
-
 // 未读数 = recentEvents 中事件时间晚于 lastViewedAt 的条目数；缺 lastViewedAt 视为全部未读
 // 注意：recentEvents 上限 maxWorkspaceStatusEvents（4），未读 badge 因此实际范围 0..4
 // 实现已抽取到 src/renderer/src/lib/workspaceUnread.ts 以便单元测试
@@ -482,14 +441,6 @@ function detectTerminalAttentionPrompt(output: string): TerminalAttentionPrompt 
   const normalizedOutput = output.replace(terminalControlSequencePattern, "").replace(/\r/g, "\n").toLowerCase();
   return terminalAttentionPrompts.find((prompt) => normalizedOutput.includes(prompt.marker));
 }
-
-const statusClass: Record<WorkspaceStatus, string> = {
-  idle: "statusIdle",
-  running: "statusRunning",
-  attention: "statusAttention",
-  success: "statusSuccess",
-  error: "statusError"
-};
 
 const socketSecurityModeLabels: Record<SocketSecurityMode, string> = {
   off: "Off",
@@ -1980,9 +1931,13 @@ async function runBrowserRpc(
   return { ...commonResult, url, mimeType, bytes: base64.length, base64 };
 }
 
-function createWorkspaceSummaries(workspaces: Workspace[], activeWorkspaceId: string): WorkspaceSummary[] {
+function createWorkspaceSummaries(workspaces: Workspace[], activeWorkspaceId: string, eventLimit?: number): WorkspaceSummary[] {
   return workspaces.map((workspace) => {
     const activePane = workspace.panes[workspace.activePaneId];
+    const recentEvents =
+      typeof eventLimit === "number" && Number.isFinite(eventLimit) && eventLimit > 0
+        ? workspace.recentEvents?.slice(0, Math.floor(eventLimit))
+        : workspace.recentEvents;
 
     return {
       id: workspace.id,
@@ -1993,7 +1948,7 @@ function createWorkspaceSummaries(workspaces: Workspace[], activeWorkspaceId: st
       activePaneId: workspace.activePaneId,
       activeSurfaceId: activePane?.activeSurfaceId,
       notice: workspace.notice,
-      recentEvents: workspace.recentEvents
+      recentEvents
     };
   });
 }
@@ -3390,7 +3345,11 @@ export function App(): ReactElement {
 
       if (request.method === "status.list") {
         const params = (request.params ?? {}) as Partial<StatusListParams>;
-        const summaries = createWorkspaceSummaries(currentWorkspaces, currentActiveWorkspaceId);
+        const eventLimit =
+          typeof params.limit === "number" && Number.isFinite(params.limit) && params.limit > 0
+            ? Math.floor(params.limit)
+            : undefined;
+        const summaries = createWorkspaceSummaries(currentWorkspaces, currentActiveWorkspaceId, eventLimit);
         const statuses = params.workspaceId
           ? summaries.filter((workspace) => workspace.id === params.workspaceId)
           : summaries;
