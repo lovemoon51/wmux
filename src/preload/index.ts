@@ -1,5 +1,6 @@
 import { clipboard, contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type {
+  AppUpdateStatus,
   PersistedAppState,
   ShellProfile,
   ShellProfileOption,
@@ -19,6 +20,16 @@ const api = {
     ipcRenderer.invoke("app:setSecurityMode", mode),
   // Smoke 模式标志：自动化测试用 textContent 断言，需禁用 WebGL/Canvas 渲染
   isSmokeMode: (): boolean => process.env.WMUX_SMOKE === "1",
+  update: {
+    getStatus: (): Promise<AppUpdateStatus> => ipcRenderer.invoke("app:getUpdateStatus"),
+    checkForUpdate: (): Promise<AppUpdateStatus> => ipcRenderer.invoke("app:checkForUpdate"),
+    install: (): Promise<{ ok: boolean }> => ipcRenderer.invoke("app:installUpdate"),
+    onStatus: (callback: (payload: AppUpdateStatus) => void): (() => void) => {
+      const listener = (_event: IpcRendererEvent, payload: AppUpdateStatus): void => callback(payload);
+      ipcRenderer.on("app:updateStatus", listener);
+      return () => ipcRenderer.removeListener("app:updateStatus", listener);
+    }
+  },
   config: {
     loadProjectConfig: (): Promise<WmuxProjectConfigResult> => ipcRenderer.invoke("config:loadProjectConfig")
   },

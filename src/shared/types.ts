@@ -536,3 +536,25 @@ export type TerminalNotificationPayload = {
   title: string;
   body: string;
 };
+
+// 自动更新状态机：renderer 据此渲染顶部横幅与按钮
+// idle = 静默；checking = 已发起请求；available = 已发现新版本但还没下完；
+// not-available = 上次检查无新版本（短暂态，10s 后回落 idle）；
+// downloading = 下载中，附 progress 0..100；downloaded = 等待重启；error = 出错
+export type AppUpdateState =
+  | "idle"
+  | "checking"
+  | "available"
+  | "not-available"
+  | "downloading"
+  | "downloaded"
+  | "error";
+
+export type AppUpdateStatus = {
+  state: AppUpdateState;
+  version?: string;
+  releaseNotes?: string;
+  // 0..100，仅 downloading 状态下意义
+  progress?: number;
+  error?: string;
+};

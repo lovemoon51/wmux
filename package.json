@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "description": "A desktop terminal workspace for AI coding agents.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lovemoon51/wmux.git"
+  },
   "main": "out/main/index.js",
   "bin": {
     "wmux": "scripts/wmux-cli.mjs"
@@ -59,6 +63,11 @@
     },
     "files": [
       "out/**/*"
-    ]
+    ],
+    "publish": {
+      "provider": "github",
+      "owner": "lovemoon51",
+      "repo": "wmux"
+    }
   }
 }

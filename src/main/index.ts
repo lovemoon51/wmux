@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { registerPtyIpc } from "./pty/ptyManager";
+import { registerAppUpdater } from "./appUpdater";
 import {
   createRpcError,
   getDefaultSocketPath,
@@ -669,6 +670,13 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   nativeTheme.themeSource = "dark";
+
+  try {
+    registerAppUpdater();
+  } catch (error) {
+    // 自动更新初始化失败不阻塞窗口创建：仅记录后继续
+    console.error("[wmux] app updater registration failed:", error);
+  }
 
   ipcMain.handle("app:version", () => app.getVersion());
   ipcMain.handle("app:securityState", () => getSocketSecuritySettings());

@@ -33,6 +33,7 @@ import {
 } from "react";
 import type { SearchAddon } from "@xterm/addon-search";
 import type {
+  AppUpdateStatus,
   BrowserClickParams,
   BrowserConsoleEntry,
   BrowserStorageArea,
@@ -2091,6 +2092,7 @@ export function App(): ReactElement {
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
   const [workspaceNameDraft, setWorkspaceNameDraft] = useState("");
   const [appVersion, setAppVersion] = useState("dev");
+  const [appUpdateStatus, setAppUpdateStatus] = useState<AppUpdateStatus>({ state: "idle" });
   const [shellProfile, setShellProfile] = useState<ShellProfile>("auto");
   const [shellOptions, setShellOptions] = useState<ShellProfileOption[]>([
     { id: "auto", label: "Auto" },
@@ -2121,6 +2123,9 @@ export function App(): ReactElement {
 
   useEffect(() => {
     void window.wmux?.getVersion().then(setAppVersion).catch(() => setAppVersion("dev"));
+    // 自动更新状态：拿首屏快照 + 订阅后续广播
+    void window.wmux?.update?.getStatus().then(setAppUpdateStatus).catch(() => undefined);
+    const unsubscribeUpdate = window.wmux?.update?.onStatus(setAppUpdateStatus);
     void window.wmux?.getSecurityState?.()
       .then((state) => {
         if (!state) {
@@ -2164,6 +2169,9 @@ export function App(): ReactElement {
           { id: "cmd", label: "CMD" }
         ]);
       });
+    return () => {
+      unsubscribeUpdate?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -2405,6 +2413,14 @@ export function App(): ReactElement {
     setCommandPaletteOpen(true);
     setCommandQuery("");
     setSelectedCommandIndex(0);
+  };
+
+  const handleInstallUpdate = (): void => {
+    void window.wmux?.update?.install();
+  };
+
+  const handleCheckForUpdate = (): void => {
+    void window.wmux?.update?.checkForUpdate();
   };
 
   const closeCommandPalette = (): void => {
@@ -4022,6 +4038,9 @@ export function App(): ReactElement {
         onClearStatus={clearWorkspaceStatus}
         onOpenCommandPalette={openCommandPalette}
         onOpenPullRequest={handleOpenTerminalUrl}
+        appUpdateStatus={appUpdateStatus}
+        onInstallUpdate={handleInstallUpdate}
+        onCheckForUpdate={handleCheckForUpdate}
         settingsOpen={settingsOpen}
         notificationsOpen={notificationsOpen}
         securityModeDraft={securityModeDraft}
@@ -4435,6 +4454,72 @@ function FindBar({
   );
 }
 
+function UpdateBanner({
+  status,
+  onInstall,
+  onCheck
+}: {
+  status: AppUpdateStatus;
+  onInstall: () => void;
+  onCheck: () => void;
+}): ReactElement | null {
+  if (status.state === "idle") {
+    return null;
+  }
+
+  let label: string;
+  let actionLabel: string | null = null;
+  let actionHandler: (() => void) | null = null;
+  let dismissible = false;
+
+  switch (status.state) {
+    case "checking":
+      label = "Checking for updates…";
+      break;
+    case "available":
+      label = status.version ? `Downloading update v${status.version}…` : "Downloading update…";
+      break;
+    case "downloading":
+      label =
+        typeof status.progress === "number"
+          ? `Downloading update… ${status.progress}%`
+          : "Downloading update…";
+      break;
+    case "downloaded":
+      label = status.version ? `Update v${status.version} ready` : "Update ready";
+      actionLabel = "Restart";
+      actionHandler = onInstall;
+      break;
+    case "not-available":
+      label = "wmux is up to date";
+      dismissible = true;
+      break;
+    case "error":
+      label = status.error ? `Update failed: ${status.error}` : "Update failed";
+      actionLabel = "Retry";
+      actionHandler = onCheck;
+      break;
+    default:
+      return null;
+  }
+
+  return (
+    <div className={`updateBanner updateBanner-${status.state}`} role="status">
+      <span className="updateBannerLabel">{label}</span>
+      {actionLabel && actionHandler && (
+        <button
+          className="updateBannerAction"
+          type="button"
+          onClick={actionHandler}
+        >
+          {actionLabel}
+        </button>
+      )}
+      {dismissible && <span className="updateBannerHint">·</span>}
+    </div>
+  );
+}
+
 function WorkspaceSidebar({
   workspaces,
   activeWorkspaceId,
@@ -4450,6 +4535,9 @@ function WorkspaceSidebar({
   onClearStatus,
   onOpenCommandPalette,
   onOpenPullRequest,
+  appUpdateStatus,
+  onInstallUpdate,
+  onCheckForUpdate,
   settingsOpen,
   notificationsOpen,
   securityModeDraft,
@@ -4473,6 +4561,9 @@ function WorkspaceSidebar({
   onClearStatus: (id: string) => void;
   onOpenCommandPalette: () => void;
   onOpenPullRequest: (url: string) => void;
+  appUpdateStatus: AppUpdateStatus;
+  onInstallUpdate: () => void;
+  onCheckForUpdate: () => void;
   settingsOpen: boolean;
   notificationsOpen: boolean;
   securityModeDraft: SocketSecurityMode;
@@ -4488,6 +4579,11 @@ function WorkspaceSidebar({
 
   return (
     <aside className="sidebar">
+      <UpdateBanner
+        status={appUpdateStatus}
+        onInstall={onInstallUpdate}
+        onCheck={onCheckForUpdate}
+      />
       <div className="brandRow">
         <div className="brandMark">
           <LayoutGrid size={17} />

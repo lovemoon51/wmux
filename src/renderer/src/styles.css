@@ -1515,3 +1515,61 @@ kbd {
   background: var(--accent);
   color: #0f1115;
 }
+
+/* 更新横幅：sidebar 顶部条状提示，仅在 state != idle 渲染 */
+.updateBanner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 11px;
+  border-radius: var(--radius-sm);
+  background: rgba(61, 174, 233, 0.1);
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.updateBanner-error {
+  background: rgba(239, 107, 115, 0.1);
+  color: var(--danger);
+}
+
+.updateBanner-downloaded {
+  background: rgba(88, 194, 125, 0.12);
+  color: var(--success);
+}
+
+.updateBanner-not-available {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+}
+
+.updateBannerLabel {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.updateBannerAction {
+  flex: none;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.updateBannerAction:hover {
+  background: currentColor;
+  color: #101214;
+}
+
+.updateBannerHint {
+  flex: none;
+  color: inherit;
+  opacity: 0.5;
+}
