@@ -110,6 +110,7 @@ import {
   recordRecentCommandUsage,
   type PaletteRecentUsageStore
 } from "./lib/commandRegistry";
+import { searchBlockHistory } from "./lib/blockHistorySearch";
 import { getWorkspaceUnreadCount } from "./lib/workspaceUnread";
 import { detectTerminalAttentionPrompt } from "./lib/terminalAttention";
 import {
@@ -127,6 +128,7 @@ import {
   validateWorkflowArgs
 } from "./lib/workflowTemplate";
 import { ArgsPromptDialog } from "./components/ArgsPromptDialog";
+import { HistorySearch } from "./components/HistorySearch";
 
 let nextSurfaceNumber = 1;
 let nextWorkspaceNumber = 1;
@@ -2084,6 +2086,9 @@ export function App(): ReactElement {
   const [findRegex, setFindRegex] = useState(false);
   const [findResultIndex, setFindResultIndex] = useState(-1);
   const [findResultCount, setFindResultCount] = useState(0);
+  const [historySearchOpen, setHistorySearchOpen] = useState(false);
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [selectedHistoryIndex, setSelectedHistoryIndex] = useState(0);
   const terminalOutputBuffersRef = useRef(new Map<string, string>());
   const terminalSearchAddonsRef = useRef(new Map<string, SearchAddon>());
   const blockSnapshotsRef = useRef(new Map<string, BlockSnapshot>());
@@ -2400,6 +2405,18 @@ export function App(): ReactElement {
     setPendingWorkflowCommand(null);
   };
 
+  const openHistorySearch = useCallback((): void => {
+    setHistorySearchOpen(true);
+    setHistoryQuery("");
+    setSelectedHistoryIndex(0);
+  }, []);
+
+  const closeHistorySearch = (): void => {
+    setHistorySearchOpen(false);
+    setHistoryQuery("");
+    setSelectedHistoryIndex(0);
+  };
+
   // FindBar：注册 SearchAddon、打开/关闭、上一个/下一个匹配
   const handleTerminalSearchReady = useCallback(
     (surfaceId: string, addon: SearchAddon): (() => void) => {
@@ -2489,12 +2506,13 @@ export function App(): ReactElement {
   useEffect(() => {
     setTerminalSearchHandlers({
       onSearchReady: handleTerminalSearchReady,
-      onRequestFind: () => openFindBar()
+      onRequestFind: () => openFindBar(),
+      onRequestHistorySearch: openHistorySearch
     });
     return () => {
       setTerminalSearchHandlers({});
     };
-  }, [handleTerminalSearchReady, openFindBar]);
+  }, [handleTerminalSearchReady, openFindBar, openHistorySearch]);
 
   // 订阅 OSC 9/99/777 终端通知：复用 status.notify 路径，写入 workspace status event
   useEffect(() => {
@@ -2738,6 +2756,44 @@ export function App(): ReactElement {
     return true;
   };
 
+  const runHistoryCommand = (block: BlockSnapshot, mode: "insert" | "execute"): void => {
+    const commandText = mode === "execute" ? appendCommandNewline(block.command) : block.command;
+    const target = findSurfaceById(workspacesRef.current, block.surfaceId);
+    if (target) {
+      setActiveWorkspaceId(target.workspace.id);
+      setWorkspaces((items) =>
+        items.map((workspace) =>
+          workspace.id === target.workspace.id
+            ? {
+                ...workspace,
+                activePaneId: target.paneId,
+                status: mode === "execute" ? "running" : "attention",
+                notice: mode === "execute" ? `已运行历史命令：${block.command}` : `已写入历史命令：${block.command}`,
+                panes: {
+                  ...workspace.panes,
+                  [target.paneId]: {
+                    ...workspace.panes[target.paneId],
+                    activeSurfaceId: target.surface.id
+                  }
+                }
+              }
+            : workspace
+        )
+      );
+    }
+
+    if (mode === "insert" && writeTerminalInputDraft(block.surfaceId, block.command)) {
+      closeHistorySearch();
+      return;
+    }
+
+    window.wmux?.terminal.input({
+      id: `${block.surfaceId}:${shellProfileRef.current}`,
+      data: commandText
+    });
+    closeHistorySearch();
+  };
+
   const openWorkflowPrompt = (command: WmuxCommandConfig): void => {
     setPendingWorkflowCommand({
       command,
@@ -2840,16 +2896,25 @@ export function App(): ReactElement {
   const buildPaletteCommands = (): PaletteCommand[] => {
     const activePane = activeWorkspace.panes[activeWorkspace.activePaneId];
     const activeSurface = activePane ? activeWorkspace.surfaces[activePane.activeSurfaceId] : undefined;
-    const blockCommands = [...blockSnapshotsRef.current.values()]
-      .slice(-20)
-      .reverse()
+    const blockHistory = searchBlockHistory([...blockSnapshotsRef.current.values()], commandQuery, {
+      includeOutput: true,
+      limit: commandQuery.trim() ? 80 : 24
+    });
+    const blockCommands = blockHistory.results
       .map(
         (block): PaletteCommand => ({
           id: `block:${block.id}`,
           category: "block",
           title: block.command || "Terminal block",
-          subtitle: `${block.workspaceName ?? block.workspaceId} / ${block.surfaceName ?? block.surfaceId}`,
-          keywords: [block.exitCode === 0 ? "success" : "error", block.cwd ?? "", block.shell ?? ""],
+          subtitle: `${block.workspaceName ?? block.workspaceId} / ${block.surfaceName ?? block.surfaceId}${typeof block.exitCode === "number" ? ` / exit ${block.exitCode}` : ""}`,
+          keywords: [
+            block.exitCode === 0 ? "success" : "error",
+            block.cwd ?? "",
+            block.shell ?? "",
+            block.command,
+            block.workspaceName ?? "",
+            block.surfaceName ?? ""
+          ],
           run: () => {
             const target = findSurfaceById(workspacesRef.current, block.surfaceId);
             if (target) {
@@ -4296,8 +4361,15 @@ export function App(): ReactElement {
   const filteredCommands = rankPaletteCommands(paletteCommands, commandQuery, {
     recentUsage: paletteRecentUsage
   });
+  const historySearch = searchBlockHistory([...blockSnapshotsRef.current.values()], historyQuery, {
+    includeOutput: false,
+    limit: 80
+  });
   const normalizedSelectedCommandIndex = filteredCommands.length
     ? Math.min(selectedCommandIndex, filteredCommands.length - 1)
+    : 0;
+  const normalizedSelectedHistoryIndex = historySearch.results.length
+    ? Math.min(selectedHistoryIndex, historySearch.results.length - 1)
     : 0;
 
   useEffect(() => {
@@ -4305,6 +4377,12 @@ export function App(): ReactElement {
       setSelectedCommandIndex(normalizedSelectedCommandIndex);
     }
   }, [normalizedSelectedCommandIndex, selectedCommandIndex]);
+
+  useEffect(() => {
+    if (selectedHistoryIndex > normalizedSelectedHistoryIndex) {
+      setSelectedHistoryIndex(normalizedSelectedHistoryIndex);
+    }
+  }, [normalizedSelectedHistoryIndex, selectedHistoryIndex]);
 
   const runPaletteCommand = (command: PaletteCommand): void => {
     const nextUsage = recordRecentCommandUsage(paletteRecentUsageRef.current, command.id);
@@ -4327,6 +4405,12 @@ export function App(): ReactElement {
       if (isPrimary && (key === "k" || key === "p")) {
         event.preventDefault();
         openCommandPalette();
+        return;
+      }
+
+      if (isPrimary && !event.altKey && !event.shiftKey && key === "r") {
+        event.preventDefault();
+        openHistorySearch();
         return;
       }
 
@@ -4514,6 +4598,17 @@ export function App(): ReactElement {
         onFindNext={(query) => findInActiveTerminal("next", query)}
         onFindPrevious={(query) => findInActiveTerminal("previous", query)}
         onClose={closeFindBar}
+      />
+      <HistorySearch
+        isOpen={historySearchOpen}
+        query={historyQuery}
+        parsedQuery={historySearch.query}
+        results={historySearch.results}
+        selectedIndex={normalizedSelectedHistoryIndex}
+        onClose={closeHistorySearch}
+        onQueryChange={setHistoryQuery}
+        onSelectedIndexChange={setSelectedHistoryIndex}
+        onRun={(block, mode) => runHistoryCommand(block, mode)}
       />
       <ProjectCommandConfirmDialog
         confirmation={pendingCommandConfirmation}

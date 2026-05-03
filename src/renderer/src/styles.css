@@ -1510,6 +1510,139 @@ kbd {
   text-align: center;
 }
 
+.historySearchOverlay {
+  position: fixed;
+  z-index: 26;
+  inset: 0;
+  display: grid;
+  place-items: start center;
+  background: rgba(4, 7, 12, 0.48);
+  padding-top: 13vh;
+}
+
+.historySearch {
+  display: grid;
+  width: min(680px, calc(100vw - 48px));
+  max-height: min(520px, calc(100vh - 120px));
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: #151a21;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+}
+
+.historySearchHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 12px 14px;
+  color: var(--text-secondary);
+}
+
+.historySearchHeader input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+}
+
+.historySearchHeader input::placeholder {
+  color: var(--text-muted);
+}
+
+.historySearchStatus {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #202631;
+  padding: 7px 14px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.historySearchError {
+  overflow: hidden;
+  color: var(--danger);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historySearchList {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.historySearchItem {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+  min-height: 54px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.historySearchItemActive,
+.historySearchItem:hover {
+  border-color: #385064;
+  background: #202833;
+}
+
+.historySearchIcon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  color: var(--accent);
+}
+
+.historySearchMain {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.historySearchCommand {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historySearchMeta {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historySearchEmpty {
+  padding: 26px 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
 .confirmOverlay {
   position: fixed;
   z-index: 30;

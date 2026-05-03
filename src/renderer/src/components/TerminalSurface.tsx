@@ -27,6 +27,7 @@ const terminalFontStack =
 type TerminalSearchHandlers = {
   onSearchReady?: (surfaceId: string, addon: SearchAddon) => () => void;
   onRequestFind?: (surfaceId: string) => void;
+  onRequestHistorySearch?: () => void;
 };
 const terminalSearchHandlers: TerminalSearchHandlers = {};
 const terminalInputDraftHandlers = new Map<string, (text: string) => boolean>();
@@ -34,6 +35,7 @@ const terminalInputDraftHandlers = new Map<string, (text: string) => boolean>();
 export function setTerminalSearchHandlers(handlers: TerminalSearchHandlers): void {
   terminalSearchHandlers.onSearchReady = handlers.onSearchReady;
   terminalSearchHandlers.onRequestFind = handlers.onRequestFind;
+  terminalSearchHandlers.onRequestHistorySearch = handlers.onRequestHistorySearch;
 }
 
 export function writeTerminalInputDraft(surfaceId: string, text: string): boolean {
@@ -308,6 +310,10 @@ export function TerminalSurface({
       }
       if (isPrimary && !event.altKey && event.key.toLowerCase() === "f") {
         terminalSearchHandlers.onRequestFind?.(surface.id);
+        return false;
+      }
+      if (isPrimary && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "r") {
+        terminalSearchHandlers.onRequestHistorySearch?.();
         return false;
       }
       return true;
