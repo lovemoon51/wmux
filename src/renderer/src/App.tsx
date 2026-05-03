@@ -36,6 +36,8 @@ import {
 import type { SearchAddon } from "@xterm/addon-search";
 import type {
   AppUpdateStatus,
+  AiSettings,
+  AiStreamEvent,
   BrowserClickParams,
   BrowserConsoleEntry,
   BrowserStorageArea,
@@ -129,6 +131,8 @@ import {
 } from "./lib/workflowTemplate";
 import { ArgsPromptDialog } from "./components/ArgsPromptDialog";
 import { HistorySearch } from "./components/HistorySearch";
+import { AiExplainPanel } from "./components/AiExplainPanel";
+import { AiSettingsForm } from "./components/AiSettings";
 
 let nextSurfaceNumber = 1;
 let nextWorkspaceNumber = 1;
@@ -216,6 +220,23 @@ type WorkspaceCommandBuildResult = {
 type BlockSnapshot = Block & {
   surfaceName?: string;
   workspaceName?: string;
+};
+
+type AiExplainState = {
+  requestId: string;
+  block: BlockSnapshot;
+  text: string;
+  status: "streaming" | "done" | "error";
+  error?: string;
+};
+
+type AiSuggestionState = {
+  requestId: string;
+  prompt: string;
+  surfaceId: string;
+  text: string;
+  status: "streaming" | "done" | "error";
+  error?: string;
 };
 
 const browserSessions = new Map<string, BrowserSessionState>();
@@ -465,6 +486,14 @@ const socketSecurityModeLabels: Record<SocketSecurityMode, string> = {
 };
 
 const socketSecurityModes: SocketSecurityMode[] = ["wmuxOnly", "token", "off", "allowAll"];
+
+const defaultAiSettings: AiSettings = {
+  enabled: false,
+  endpoint: "https://api.openai.com/v1",
+  model: "gpt-4o-mini",
+  redactSecrets: true,
+  maxOutputBytes: 4096
+};
 
 const initialWorkspaces: Workspace[] = [
   {
@@ -857,6 +886,14 @@ function getTerminalKeySequence(key: string): string | null {
   return terminalKeySequences[normalizeTerminalKey(key)] ?? null;
 }
 
+function readAiSuggestions(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(?:[-*]|\d+\.)\s*/, "").replace(/^`{1,3}|`{1,3}$/g, "").trim())
+    .filter((line) => line.length > 0 && !line.startsWith("#"))
+    .slice(0, 3);
+}
+
 const socketCapabilities: SocketRpcMethod[] = [
   "system.ping",
   "system.identify",
@@ -883,6 +920,8 @@ const socketCapabilities: SocketRpcMethod[] = [
   "block.list",
   "block.get",
   "block.rerun",
+  "ai.explain",
+  "ai.suggest",
   "browser.navigate",
   "browser.click",
   "browser.fill",
@@ -2079,6 +2118,10 @@ export function App(): ReactElement {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [securitySettings, setSecuritySettings] = useState<SocketSecuritySettings | null>(null);
   const [securityModeDraft, setSecurityModeDraft] = useState<SocketSecurityMode>("wmuxOnly");
+  const [aiSettings, setAiSettings] = useState<AiSettings>(defaultAiSettings);
+  const [aiSettingsDraft, setAiSettingsDraft] = useState<AiSettings>(defaultAiSettings);
+  const [aiExplainState, setAiExplainState] = useState<AiExplainState | null>(null);
+  const [aiSuggestionState, setAiSuggestionState] = useState<AiSuggestionState | null>(null);
   // FindBar 状态：当前活动 workspace 的活动 surface 内搜索
   const [findBarOpen, setFindBarOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
@@ -2126,6 +2169,13 @@ export function App(): ReactElement {
               : workspace
           )
         );
+      })
+      .catch(() => undefined);
+    void window.wmux?.ai
+      ?.getSettings()
+      .then((settings) => {
+        setAiSettings(settings);
+        setAiSettingsDraft({ ...settings, apiKey: "" });
       })
       .catch(() => undefined);
     void window.wmux?.terminal
@@ -2606,6 +2656,37 @@ export function App(): ReactElement {
     return cleanup;
   }, []);
 
+  useEffect(() => {
+    const cleanup = window.wmux?.ai?.onStream((event: AiStreamEvent) => {
+      setAiExplainState((currentState) => {
+        if (!currentState || currentState.requestId !== event.requestId) {
+          return currentState;
+        }
+        if (event.type === "token") {
+          return { ...currentState, text: `${currentState.text}${event.token}` };
+        }
+        if (event.type === "done") {
+          return { ...currentState, status: "done" };
+        }
+        return { ...currentState, status: "error", error: event.error };
+      });
+      setAiSuggestionState((currentState) => {
+        if (!currentState || currentState.requestId !== event.requestId) {
+          return currentState;
+        }
+        if (event.type === "token") {
+          return { ...currentState, text: `${currentState.text}${event.token}` };
+        }
+        if (event.type === "done") {
+          return { ...currentState, status: "done" };
+        }
+        return { ...currentState, status: "error", error: event.error };
+      });
+    });
+
+    return cleanup;
+  }, []);
+
   // active workspace 切换时为该 workspace 标记已读时间戳：unread badge 据此清零
   useEffect(() => {
     if (!activeWorkspaceId) {
@@ -2794,6 +2875,80 @@ export function App(): ReactElement {
     closeHistorySearch();
   };
 
+  const explainBlockWithAi = (block: Block): void => {
+    const snapshot = blockSnapshotsRef.current.get(block.id) ?? block;
+    const requestId = `ai-explain-${block.id}-${Date.now()}`;
+    setAiExplainState({
+      requestId,
+      block: snapshot,
+      text: "",
+      status: "streaming"
+    });
+    void window.wmux?.ai
+      ?.explain({
+        requestId,
+        blockId: block.id,
+        surfaceId: block.surfaceId
+      })
+      .catch((error) => {
+        setAiExplainState((currentState) =>
+          currentState?.requestId === requestId
+            ? {
+                ...currentState,
+                status: "error",
+                error: error instanceof Error ? error.message : String(error)
+              }
+            : currentState
+        );
+      });
+  };
+
+  const requestAiCommandSuggestions = ({
+    prompt,
+    surfaceId,
+    cwd,
+    shell
+  }: {
+    prompt: string;
+    surfaceId: string;
+    cwd: string;
+    shell: ShellProfile;
+  }): void => {
+    const requestId = `ai-suggest-${surfaceId}-${Date.now()}`;
+    setAiSuggestionState({
+      requestId,
+      prompt,
+      surfaceId,
+      text: "",
+      status: "streaming"
+    });
+    setCommandQuery(prompt);
+    setSelectedCommandIndex(0);
+    setCommandPaletteOpen(true);
+    void window.wmux?.ai
+      ?.suggest({
+        requestId,
+        prompt,
+        cwd,
+        shell
+      })
+      .catch((error) => {
+        setAiSuggestionState((currentState) =>
+          currentState?.requestId === requestId
+            ? {
+                ...currentState,
+                status: "error",
+                error: error instanceof Error ? error.message : String(error)
+              }
+            : currentState
+        );
+      });
+  };
+
+  const cancelAiRequest = (requestId: string): void => {
+    void window.wmux?.ai?.cancel({ requestId }).catch(() => undefined);
+  };
+
   const openWorkflowPrompt = (command: WmuxCommandConfig): void => {
     setPendingWorkflowCommand({
       command,
@@ -2893,6 +3048,23 @@ export function App(): ReactElement {
       .catch(() => undefined);
   };
 
+  const handleSaveAiSettings = (): void => {
+    void window.wmux?.ai
+      ?.setSettings({
+        enabled: aiSettingsDraft.enabled,
+        endpoint: aiSettingsDraft.endpoint,
+        model: aiSettingsDraft.model,
+        apiKey: aiSettingsDraft.apiKey,
+        redactSecrets: aiSettingsDraft.redactSecrets,
+        maxOutputBytes: aiSettingsDraft.maxOutputBytes
+      })
+      .then((settings) => {
+        setAiSettings(settings);
+        setAiSettingsDraft({ ...settings, apiKey: "" });
+      })
+      .catch(() => undefined);
+  };
+
   const buildPaletteCommands = (): PaletteCommand[] => {
     const activePane = activeWorkspace.panes[activeWorkspace.activePaneId];
     const activeSurface = activePane ? activeWorkspace.surfaces[activePane.activeSurfaceId] : undefined;
@@ -2900,6 +3072,41 @@ export function App(): ReactElement {
       includeOutput: true,
       limit: commandQuery.trim() ? 80 : 24
     });
+    const aiSuggestionLines =
+      aiSuggestionState?.text
+        .split(/\r?\n/)
+        .map((line) => line.replace(/^\s*(?:[-*]|\d+\.)\s*/, "").replace(/^`{1,3}|`{1,3}$/g, "").trim())
+        .filter((line) => line && !line.startsWith("#"))
+        .slice(0, 3) ?? [];
+    const aiCommands: PaletteCommand[] =
+      aiSuggestionState && aiSettings.enabled
+        ? aiSuggestionLines.length > 0
+          ? aiSuggestionLines.map((command, index) => ({
+              id: `ai:suggest:${aiSuggestionState.requestId}:${index}`,
+              category: "ai",
+              title: command,
+              subtitle: aiSuggestionState.prompt,
+              keywords: [aiSuggestionState.prompt, command],
+              shortcut: "AI",
+              run: () => {
+                writeCommandToActiveTerminalDraft(command, "AI suggestion");
+                setAiSuggestionState(null);
+              }
+            }))
+          : [
+              {
+                id: `ai:suggest:${aiSuggestionState.requestId}:pending`,
+                category: "ai",
+                title:
+                  aiSuggestionState.status === "error"
+                    ? `AI failed: ${aiSuggestionState.error ?? "unknown error"}`
+                    : "AI is generating commands...",
+                subtitle: aiSuggestionState.prompt,
+                shortcut: aiSuggestionState.status === "streaming" ? "Streaming" : "AI",
+                run: () => undefined
+              }
+            ]
+        : [];
     const blockCommands = blockHistory.results
       .map(
         (block): PaletteCommand => ({
@@ -3055,6 +3262,7 @@ export function App(): ReactElement {
         }
       ),
       ...blockCommands,
+      ...aiCommands,
       {
         id: "settings:open",
         category: "settings",
@@ -3841,6 +4049,43 @@ export function App(): ReactElement {
         return;
       }
 
+      if (request.method === "ai.explain") {
+        const params = (request.params ?? {}) as Partial<{ blockId: string }>;
+        if (typeof params.blockId !== "string" || !params.blockId.trim()) {
+          window.wmux?.socket.respond(createSocketErrorResponse(request.id, "BAD_REQUEST", "ai.explain 需要 blockId"));
+          return;
+        }
+        const block = blockSnapshotsRef.current.get(params.blockId);
+        if (!block) {
+          window.wmux?.socket.respond(createSocketErrorResponse(request.id, "NOT_FOUND", "找不到 block", { blockId: params.blockId }));
+          return;
+        }
+        explainBlockWithAi(block);
+        window.wmux?.socket.respond(createSocketSuccessResponse(request.id, { blockId: block.id, surfaceId: block.surfaceId }));
+        return;
+      }
+
+      if (request.method === "ai.suggest") {
+        const params = (request.params ?? {}) as Partial<{ prompt: string; surfaceId?: string }>;
+        if (typeof params.prompt !== "string" || !params.prompt.trim()) {
+          window.wmux?.socket.respond(createSocketErrorResponse(request.id, "BAD_REQUEST", "ai.suggest 需要 prompt"));
+          return;
+        }
+        const terminalSurface = getActiveTerminalSurface(currentWorkspace, params.surfaceId);
+        if (!terminalSurface) {
+          window.wmux?.socket.respond(createSocketErrorResponse(request.id, "NOT_FOUND", "当前 workspace 没有 terminal surface"));
+          return;
+        }
+        requestAiCommandSuggestions({
+          prompt: params.prompt,
+          surfaceId: terminalSurface.id,
+          cwd: currentWorkspace.cwd,
+          shell: shellProfileRef.current
+        });
+        window.wmux?.socket.respond(createSocketSuccessResponse(request.id, { surfaceId: terminalSurface.id }));
+        return;
+      }
+
       if (isBrowserRpcMethod(request.method)) {
         void runBrowserRpc(
           request.method,
@@ -4524,6 +4769,8 @@ export function App(): ReactElement {
         notificationsOpen={notificationsOpen}
         securityModeDraft={securityModeDraft}
         securitySettings={securitySettings}
+        aiSettings={aiSettings}
+        aiSettingsDraft={aiSettingsDraft}
         onToggleNotifications={() => {
           setNotificationsOpen((isOpen) => !isOpen);
           setSettingsOpen(false);
@@ -4534,6 +4781,8 @@ export function App(): ReactElement {
         }}
         onSecurityModeDraftChange={setSecurityModeDraft}
         onSaveSecurityMode={handleSaveSecurityMode}
+        onAiSettingsDraftChange={setAiSettingsDraft}
+        onSaveAiSettings={handleSaveAiSettings}
       />
       <section className="workspaceArea">
         <TitleBar
@@ -4567,6 +4816,9 @@ export function App(): ReactElement {
             onUpdateSurfaceSubtitle={handleUpdateSurfaceSubtitle}
             onOpenTerminalUrl={handleOpenTerminalUrl}
             onTerminalOutput={handleTerminalOutput}
+            aiSettings={aiSettings}
+            onExplainBlock={explainBlockWithAi}
+            onAiSuggest={requestAiCommandSuggestions}
           />
         </div>
       </section>
@@ -4610,6 +4862,21 @@ export function App(): ReactElement {
         onSelectedIndexChange={setSelectedHistoryIndex}
         onRun={(block, mode) => runHistoryCommand(block, mode)}
       />
+      {aiExplainState && (
+        <div className="aiExplainOverlay" role="presentation">
+          <AiExplainPanel
+            block={aiExplainState.block}
+            text={aiExplainState.text}
+            status={aiExplainState.status}
+            error={aiExplainState.error}
+            suggestions={readAiSuggestions(aiExplainState.text)}
+            onCancel={() => cancelAiRequest(aiExplainState.requestId)}
+            onClose={() => setAiExplainState(null)}
+            onInsertCommand={(command) => writeCommandToActiveTerminalDraft(command, "AI fix")}
+            onCopy={(text) => window.wmux?.clipboard.writeText(text)}
+          />
+        </div>
+      )}
       <ProjectCommandConfirmDialog
         confirmation={pendingCommandConfirmation}
         configPath={pendingCommandConfirmation?.command.sourcePath ?? projectConfig?.path}
@@ -5057,10 +5324,14 @@ function WorkspaceSidebar({
   notificationsOpen,
   securityModeDraft,
   securitySettings,
+  aiSettings,
+  aiSettingsDraft,
   onToggleNotifications,
   onToggleSettings,
   onSecurityModeDraftChange,
-  onSaveSecurityMode
+  onSaveSecurityMode,
+  onAiSettingsDraftChange,
+  onSaveAiSettings
 }: {
   workspaces: Workspace[];
   activeWorkspaceId: string;
@@ -5083,10 +5354,14 @@ function WorkspaceSidebar({
   notificationsOpen: boolean;
   securityModeDraft: SocketSecurityMode;
   securitySettings: SocketSecuritySettings | null;
+  aiSettings: AiSettings;
+  aiSettingsDraft: AiSettings;
   onToggleNotifications: () => void;
   onToggleSettings: () => void;
   onSecurityModeDraftChange: (mode: SocketSecurityMode) => void;
   onSaveSecurityMode: () => void;
+  onAiSettingsDraftChange: (settings: AiSettings) => void;
+  onSaveAiSettings: () => void;
 }): ReactElement {
   const notificationItems = workspaces.filter((workspace) =>
     Boolean(workspace.notice || workspace.recentEvents?.length)
@@ -5424,6 +5699,13 @@ function WorkspaceSidebar({
             <button className="utilityButton settingsSaveButton" type="button" onClick={onSaveSecurityMode}>
               Save
             </button>
+            <div className="settingsDivider" />
+            <AiSettingsForm
+              settings={aiSettings}
+              draft={aiSettingsDraft}
+              onDraftChange={onAiSettingsDraftChange}
+              onSave={onSaveAiSettings}
+            />
           </div>
         )}
       </div>
@@ -5517,7 +5799,10 @@ function LayoutRenderer({
   onDropSurfaceToPane,
   onUpdateSurfaceSubtitle,
   onOpenTerminalUrl,
-  onTerminalOutput
+  onTerminalOutput,
+  aiSettings,
+  onExplainBlock,
+  onAiSuggest
 }: {
   workspace: Workspace;
   node: LayoutNode;
@@ -5532,6 +5817,9 @@ function LayoutRenderer({
   onUpdateSurfaceSubtitle: (surfaceId: string, subtitle: string) => void;
   onOpenTerminalUrl: (url: string) => void;
   onTerminalOutput: (surfaceId: string, output: string) => void;
+  aiSettings: AiSettings;
+  onExplainBlock: (block: Block) => void;
+  onAiSuggest: (payload: { prompt: string; surfaceId: string; cwd: string; shell: ShellProfile }) => void;
 }): ReactElement {
   if (node.type === "pane") {
     return (
@@ -5548,6 +5836,9 @@ function LayoutRenderer({
         onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle}
         onOpenTerminalUrl={onOpenTerminalUrl}
         onTerminalOutput={onTerminalOutput}
+        aiSettings={aiSettings}
+        onExplainBlock={onExplainBlock}
+        onAiSuggest={onAiSuggest}
       />
     );
   }
@@ -5575,6 +5866,9 @@ function LayoutRenderer({
         onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle}
         onOpenTerminalUrl={onOpenTerminalUrl}
         onTerminalOutput={onTerminalOutput}
+        aiSettings={aiSettings}
+        onExplainBlock={onExplainBlock}
+        onAiSuggest={onAiSuggest}
       />
       <SplitHandle node={node} onResizeSplit={onResizeSplit} />
       <LayoutRenderer
@@ -5591,6 +5885,9 @@ function LayoutRenderer({
         onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle}
         onOpenTerminalUrl={onOpenTerminalUrl}
         onTerminalOutput={onTerminalOutput}
+        aiSettings={aiSettings}
+        onExplainBlock={onExplainBlock}
+        onAiSuggest={onAiSuggest}
       />
     </div>
   );
@@ -5654,7 +5951,10 @@ function PaneView({
   onDropSurfaceToPane,
   onUpdateSurfaceSubtitle,
   onOpenTerminalUrl,
-  onTerminalOutput
+  onTerminalOutput,
+  aiSettings,
+  onExplainBlock,
+  onAiSuggest
 }: {
   workspace: Workspace;
   paneId: string;
@@ -5668,6 +5968,9 @@ function PaneView({
   onUpdateSurfaceSubtitle: (surfaceId: string, subtitle: string) => void;
   onOpenTerminalUrl: (url: string) => void;
   onTerminalOutput: (surfaceId: string, output: string) => void;
+  aiSettings: AiSettings;
+  onExplainBlock: (block: Block) => void;
+  onAiSuggest: (payload: { prompt: string; surfaceId: string; cwd: string; shell: ShellProfile }) => void;
 }): ReactElement {
   const pane = workspace.panes[paneId];
   const surfaces = pane.surfaceIds.map((id) => workspace.surfaces[id]);
@@ -5738,6 +6041,9 @@ function PaneView({
               onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle}
               onOpenTerminalUrl={onOpenTerminalUrl}
               onTerminalOutput={onTerminalOutput}
+              aiSettings={aiSettings}
+              onExplainBlock={onExplainBlock}
+              onAiSuggest={onAiSuggest}
             />
           </div>
         ))}
@@ -5825,7 +6131,10 @@ function SurfaceBody({
   shellProfile,
   onUpdateSurfaceSubtitle,
   onOpenTerminalUrl,
-  onTerminalOutput
+  onTerminalOutput,
+  aiSettings,
+  onExplainBlock,
+  onAiSuggest
 }: {
   surface: Surface;
   workspaceId: string;
@@ -5834,6 +6143,9 @@ function SurfaceBody({
   onUpdateSurfaceSubtitle: (surfaceId: string, subtitle: string) => void;
   onOpenTerminalUrl: (url: string) => void;
   onTerminalOutput: (surfaceId: string, output: string) => void;
+  aiSettings: AiSettings;
+  onExplainBlock: (block: Block) => void;
+  onAiSuggest: (payload: { prompt: string; surfaceId: string; cwd: string; shell: ShellProfile }) => void;
 }): ReactElement {
   if (surface.type === "browser") {
     return <BrowserSurface surface={surface} onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle} />;
@@ -5847,6 +6159,9 @@ function SurfaceBody({
       shell={shellProfile}
       onOpenUrl={onOpenTerminalUrl}
       onOutput={onTerminalOutput}
+      aiSettings={aiSettings}
+      onExplainBlock={onExplainBlock}
+      onAiSuggest={onAiSuggest}
     />
   );
 }

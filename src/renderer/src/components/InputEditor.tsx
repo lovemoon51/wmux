@@ -17,6 +17,7 @@ type InputEditorProps = {
   workspaceId: string;
   onChange: (value: string) => void;
   onSubmit: () => void;
+  onAiSuggest?: (prompt: string) => void;
   onInterrupt: () => void;
   onToggleCapture: () => void;
 };
@@ -31,6 +32,7 @@ export function InputEditor({
   workspaceId,
   onChange,
   onSubmit,
+  onAiSuggest,
   onInterrupt,
   onToggleCapture
 }: InputEditorProps): ReactElement {
@@ -39,6 +41,7 @@ export function InputEditor({
   const valueRef = useRef(value);
   const onChangeRef = useRef(onChange);
   const onSubmitRef = useRef(onSubmit);
+  const onAiSuggestRef = useRef(onAiSuggest);
   const onInterruptRef = useRef(onInterrupt);
   const onToggleCaptureRef = useRef(onToggleCapture);
   const completionContextRef = useRef({ cwd, shell, surfaceId, workspaceId });
@@ -54,6 +57,10 @@ export function InputEditor({
   useEffect(() => {
     onSubmitRef.current = onSubmit;
   }, [onSubmit]);
+
+  useEffect(() => {
+    onAiSuggestRef.current = onAiSuggest;
+  }, [onAiSuggest]);
 
   useEffect(() => {
     onInterruptRef.current = onInterrupt;
@@ -96,6 +103,11 @@ export function InputEditor({
               run: (editorView) => {
                 if (completionStatus(editorView.state) === "active") {
                   return false;
+                }
+                const value = editorView.state.doc.toString().trim();
+                if (value.startsWith("#") && value.slice(1).trim() && onAiSuggestRef.current) {
+                  onAiSuggestRef.current(value.slice(1).trim());
+                  return true;
                 }
                 onSubmitRef.current();
                 return true;

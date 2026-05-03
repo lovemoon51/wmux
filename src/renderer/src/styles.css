@@ -603,7 +603,8 @@ kbd {
   font-size: 11px;
 }
 
-.settingsField select {
+.settingsField select,
+.settingsField input {
   height: 28px;
   min-width: 0;
   border: 1px solid var(--border-subtle);
@@ -617,6 +618,28 @@ kbd {
 .settingsField option {
   background: #1b1f26;
   color: var(--text-primary);
+}
+
+.settingsToggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.settingsToggle input {
+  accent-color: var(--accent);
+}
+
+.settingsDivider {
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+.aiSettingsGroup {
+  display: grid;
+  gap: 8px;
 }
 
 .settingsMeta,
@@ -1641,6 +1664,96 @@ kbd {
   padding: 26px 12px;
   color: var(--text-muted);
   text-align: center;
+}
+
+.aiExplainOverlay {
+  position: fixed;
+  z-index: 28;
+  right: 22px;
+  bottom: 22px;
+  width: min(560px, calc(100vw - 44px));
+}
+
+.aiExplainPanel {
+  display: grid;
+  max-height: min(520px, calc(100vh - 80px));
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: #151a21;
+  box-shadow: var(--shadow-lg);
+}
+
+.aiExplainHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 11px 12px;
+}
+
+.aiExplainHeader div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.aiExplainHeader strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.aiExplainHeader span {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aiExplainActions {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+}
+
+.aiExplainBody {
+  overflow: auto;
+  min-height: 120px;
+  max-height: 300px;
+  margin: 0;
+  padding: 12px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.aiSuggestionList {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid var(--border-subtle);
+  padding: 10px;
+}
+
+.aiSuggestionItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.aiSuggestionItem code {
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: #11161d;
+  color: var(--text-primary);
+  padding: 6px 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .confirmOverlay {

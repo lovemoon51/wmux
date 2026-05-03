@@ -1,7 +1,7 @@
-import { app, BrowserWindow, ipcMain, nativeTheme, shell } from "electron";
+import { app, BrowserWindow, ipcMain, nativeTheme, safeStorage, shell } from "electron";
 import { randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
@@ -16,6 +16,15 @@ import {
   serializeOutputBuffers
 } from "./pty/outputBufferPersistence";
 import { registerAppUpdater } from "./appUpdater";
+import { requestChatCompletion } from "./ai/aiClient";
+import { redactSecrets } from "./ai/redaction";
+import {
+  mergeAiSettingsUpdate,
+  readAppSettings,
+  resolveAiSettings,
+  toPublicAiSettings,
+  updateAppSettings
+} from "./settingsStore";
 import {
   createRpcError,
   getDefaultSocketPath,
@@ -24,6 +33,12 @@ import {
 } from "./socket/rpcServer";
 import type {
   BrowserRpcMethod,
+  AiCancelRequest,
+  AiExplainRequest,
+  AiSettings,
+  AiSettingsUpdate,
+  AiSuggestRequest,
+  AiStreamEvent,
   PersistedAppState,
   PullRequestState,
   PullRequestSummary,
@@ -58,6 +73,10 @@ const socketToken = process.env.WMUX_SOCKET_TOKEN || randomBytes(32).toString("h
 const socketAllowAllWarning = "WMUX_SECURITY_MODE=allowAll: local socket accepts requests without token.";
 let mainWindow: BrowserWindow | null = null;
 let socketRpcServer: SocketRpcServer | null = null;
+type AiStreamEventWithoutRequestId =
+  | { type: "token"; token: string }
+  | { type: "done" }
+  | { type: "error"; error: string };
 const pendingRendererRequests = new Map<
   string,
   {
@@ -66,6 +85,7 @@ const pendingRendererRequests = new Map<
     timer: NodeJS.Timeout;
   }
 >();
+const aiAbortControllers = new Map<string, AbortController>();
 process.env.WMUX_SOCKET_PATH = socketPath;
 process.env.WMUX_SOCKET_TOKEN = socketToken;
 process.env.WMUX_SECURITY_MODE = socketSecurityMode;
@@ -125,24 +145,15 @@ function readSocketSecurityMode(): SocketSecurityMode {
 }
 
 function readConfiguredSocketSecurityMode(): SocketSecurityMode | undefined {
-  try {
-    if (!existsSync(getSettingsPath())) {
-      return undefined;
-    }
-    const settings = JSON.parse(readFileSync(getSettingsPath(), "utf8")) as unknown;
-    if (isRecord(settings) && isSocketSecurityMode(settings.socketSecurityMode)) {
-      return settings.socketSecurityMode;
-    }
-  } catch {
-    return undefined;
-  }
-
-  return undefined;
+  const settings = readAppSettings(getSettingsPath());
+  return isSocketSecurityMode(settings.socketSecurityMode) ? settings.socketSecurityMode : undefined;
 }
 
 async function writeConfiguredSocketSecurityMode(mode: SocketSecurityMode): Promise<void> {
-  await mkdir(app.getPath("userData"), { recursive: true });
-  await writeFile(getSettingsPath(), `${JSON.stringify({ socketSecurityMode: mode }, null, 2)}\n`, "utf8");
+  await updateAppSettings(getSettingsPath(), (settings) => ({
+    ...settings,
+    socketSecurityMode: mode
+  }));
 }
 
 function getGlobalConfigPath(): string {
@@ -175,6 +186,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function requireAiEnabled(settings: AiSettings): void {
+  if (!settings.enabled || !settings.endpoint.trim() || !settings.model.trim()) {
+    throw createRpcError("INVALID_STATE", "AI 尚未启用或配置不完整");
+  }
+}
+
+function sanitizeAiText(value: string, settings: AiSettings): string {
+  return settings.redactSecrets ? redactSecrets(value) : value;
+}
+
+function tailText(value: string, maxBytes: number): string {
+  if (Buffer.byteLength(value, "utf8") <= maxBytes) {
+    return value;
+  }
+  return Buffer.from(value, "utf8").subarray(-maxBytes).toString("utf8");
+}
+
 function readOptionalString(record: Record<string, unknown>, key: string): string | undefined {
   const value = record[key];
   return typeof value === "string" && value.trim() ? value : undefined;
@@ -194,6 +222,37 @@ function readOptionalKeywords(record: Record<string, unknown>): string[] | undef
   return value
     .filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
     .map((item) => item.trim());
+}
+
+function getAiSettings(includeApiKey = false): AiSettings {
+  const settings = resolveAiSettings(readAppSettings(getSettingsPath()), safeStorage);
+  return includeApiKey ? settings : toPublicAiSettings(settings);
+}
+
+async function writeAiSettings(update: AiSettingsUpdate): Promise<AiSettings> {
+  const settings = await updateAppSettings(getSettingsPath(), (currentSettings) =>
+    mergeAiSettingsUpdate(currentSettings, update, safeStorage)
+  );
+  return toPublicAiSettings(resolveAiSettings(settings, safeStorage));
+}
+
+function emitAiStream(requestId: string, event: AiStreamEventWithoutRequestId): void {
+  const window = mainWindow;
+  if (!window || window.isDestroyed()) {
+    return;
+  }
+  window.webContents.send("ai:stream", { requestId, ...event } as AiStreamEvent);
+}
+
+function createAiAbortController(requestId: string): AbortController {
+  aiAbortControllers.get(requestId)?.abort();
+  const controller = new AbortController();
+  aiAbortControllers.set(requestId, controller);
+  return controller;
+}
+
+function clearAiAbortController(requestId: string): void {
+  aiAbortControllers.delete(requestId);
 }
 
 function parseCommandArgConfig(value: unknown, errors: string[], context: string): WmuxCommandArg | null {
@@ -785,6 +844,107 @@ app.whenReady().then(() => {
     await writeConfiguredSocketSecurityMode(mode);
     return getSocketSecuritySettings(mode);
   });
+  ipcMain.handle("ai:getSettings", (): AiSettings => getAiSettings(false));
+  ipcMain.handle("ai:setSettings", async (_event, update: AiSettingsUpdate): Promise<AiSettings> => {
+    if (!isRecord(update)) {
+      throw createRpcError("BAD_REQUEST", "AI settings update 必须是对象");
+    }
+    return writeAiSettings(update);
+  });
+  ipcMain.handle("ai:cancel", (_event, request: AiCancelRequest): { ok: true } => {
+    if (!isRecord(request) || typeof request.requestId !== "string") {
+      throw createRpcError("BAD_REQUEST", "ai.cancel 需要 requestId");
+    }
+    aiAbortControllers.get(request.requestId)?.abort();
+    clearAiAbortController(request.requestId);
+    return { ok: true };
+  });
+  ipcMain.handle("ai:explain", async (_event, request: AiExplainRequest): Promise<{ requestId: string; blockId: string }> => {
+    if (!isRecord(request) || typeof request.requestId !== "string" || typeof request.blockId !== "string") {
+      throw createRpcError("BAD_REQUEST", "ai.explain 需要 requestId 和 blockId");
+    }
+    const settings = getAiSettings(true);
+    requireAiEnabled(settings);
+    const sessionId = request.surfaceId ? `${request.surfaceId}:auto` : undefined;
+    const blocksBySession = snapshotBlocks();
+    const outputBySession = snapshotOutputBuffers();
+    const matched = [...blocksBySession.entries()].flatMap(([id, blocks]) =>
+      blocks.map((block) => ({ id, block }))
+    ).find((item) => item.block.id === request.blockId);
+    const block = matched?.block;
+    if (!block) {
+      throw createRpcError("NOT_FOUND", "找不到 block", { blockId: request.blockId });
+    }
+    const output = tailText(outputBySession.get(matched.id) ?? (sessionId ? outputBySession.get(sessionId) ?? "" : ""), settings.maxOutputBytes);
+    const context = sanitizeAiText(
+      [
+        `command: ${block.command}`,
+        `exit_code: ${block.exitCode ?? "unknown"}`,
+        `cwd: ${block.cwd ?? ""}`,
+        `shell: ${block.shell ?? ""}`,
+        "last_output:",
+        output
+      ].join("\n"),
+      settings
+    );
+    const controller = createAiAbortController(request.requestId);
+    void requestChatCompletion({
+      settings,
+      signal: controller.signal,
+      messages: [
+        {
+          role: "system",
+          content:
+            "你是 wmux 终端助手。请用简体中文解释失败命令的可能原因，并给出最多三条可复制的修复命令。"
+        },
+        { role: "user", content: context }
+      ],
+      onToken: (token) => emitAiStream(request.requestId, { type: "token", token })
+    })
+      .then(() => emitAiStream(request.requestId, { type: "done" }))
+      .catch((error) =>
+        emitAiStream(request.requestId, {
+          type: "error",
+          error: error instanceof Error && error.name === "AbortError" ? "已取消" : error instanceof Error ? error.message : String(error)
+        })
+      )
+      .finally(() => clearAiAbortController(request.requestId));
+    return { requestId: request.requestId, blockId: request.blockId };
+  });
+  ipcMain.handle("ai:suggest", async (_event, request: AiSuggestRequest): Promise<{ requestId: string }> => {
+    if (!isRecord(request) || typeof request.requestId !== "string" || typeof request.prompt !== "string") {
+      throw createRpcError("BAD_REQUEST", "ai.suggest 需要 requestId 和 prompt");
+    }
+    const settings = getAiSettings(true);
+    requireAiEnabled(settings);
+    const prompt = sanitizeAiText(request.prompt, settings);
+    const controller = createAiAbortController(request.requestId);
+    void requestChatCompletion({
+      settings,
+      signal: controller.signal,
+      messages: [
+        {
+          role: "system",
+          content:
+            "你是终端命令生成器。只返回 1 到 3 条可直接在当前 shell 执行的命令，每行一条，不要解释。"
+        },
+        {
+          role: "user",
+          content: [`cwd: ${request.cwd ?? ""}`, `shell: ${request.shell ?? ""}`, `task: ${prompt}`].join("\n")
+        }
+      ],
+      onToken: (token) => emitAiStream(request.requestId, { type: "token", token })
+    })
+      .then(() => emitAiStream(request.requestId, { type: "done" }))
+      .catch((error) =>
+        emitAiStream(request.requestId, {
+          type: "error",
+          error: error instanceof Error && error.name === "AbortError" ? "已取消" : error instanceof Error ? error.message : String(error)
+        })
+      )
+      .finally(() => clearAiAbortController(request.requestId));
+    return { requestId: request.requestId };
+  });
   ipcMain.handle("config:loadProjectConfig", () => loadProjectConfig());
   ipcMain.handle("workspace:loadState", async (): Promise<PersistedAppState | null> => {
     try {
@@ -848,6 +1008,8 @@ app.on("before-quit", () => {
     request.reject(createRpcError("INVALID_STATE", "应用正在退出"));
   });
   pendingRendererRequests.clear();
+  aiAbortControllers.forEach((controller) => controller.abort());
+  aiAbortControllers.clear();
   void socketRpcServer?.close();
   // 终端 scrollback 持久化：尽力写盘，失败静默吞掉避免阻塞退出
   persistScrollbackToDisk();

@@ -7,6 +7,7 @@ Project: ./wmux.json
 Project compatibility fallback: ./.cmux/cmux.json
 Global macOS/Linux: ~/.config/wmux/wmux.json
 Global Windows: %APPDATA%/wmux/wmux.json
+Runtime settings: app userData/settings.json
 ```
 
 项目配置优先于全局配置。同名 command 由项目配置覆盖。项目根目录存在 `wmux.json` 时只读取它；不存在时才读取 `.cmux/cmux.json` 作为 cmux 兼容入口。两者使用同一套 schema，不引入并行配置模型。
@@ -136,7 +137,25 @@ arguments:
 
 `name` 映射到 command 名称，`command` 映射到 `commandTemplate`，`tags` 映射到 `keywords`，`arguments[].default_value` 映射到 `args[].default`。没有默认值的 YAML argument 在 wmux 中按 required 处理。
 
-## 3. SQLite 表
+## 3. Runtime Settings
+
+`settings.json` 保存本机运行时偏好，不属于项目配置，也不会进入 `wmux.json`。当前字段：
+
+```ts
+type AiSettings = {
+  enabled: boolean;
+  endpoint: string;
+  model: string;
+  apiKey?: string;
+  apiKeySet?: boolean;
+  redactSecrets: boolean;
+  maxOutputBytes: number;
+};
+```
+
+`ai.apiKey` 通过 Electron `safeStorage` 加密后落盘，renderer 只读取 `apiKeySet`。`redactSecrets` 启用时，Explain/Suggest 发送上下文前会替换常见 `sk-`、`ghp_`、`AKIA` 与 `token=` 等敏感片段。
+
+## 4. SQLite 表
 
 ### windows
 
@@ -212,7 +231,7 @@ create table command_history (
 );
 ```
 
-## 4. Runtime 不入库的数据
+## 5. Runtime 不入库的数据
 
 - PTY process handle。
 - Browser WebContents handle。
@@ -220,7 +239,7 @@ create table command_history (
 - 瞬时 hover/focus UI 状态。
 - 未持久化的 terminal alternate screen 内容。
 
-## 5. Session restore 策略
+## 6. Session restore 策略
 
 重启后恢复：
 

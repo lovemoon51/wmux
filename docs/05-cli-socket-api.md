@@ -113,6 +113,15 @@ wmux block get --block <blockId>
 wmux block rerun --block <blockId>
 ```
 
+### AI
+
+```bash
+wmux ai explain --block <blockId>
+wmux ai suggest "# 把所有 png 转成 webp"
+```
+
+AI 入口需要先在设置里启用 BYOK 配置；未配置时 socket 会返回 `INVALID_STATE`，不会隐式联网。
+
 ### 浏览器
 
 ```bash
@@ -163,6 +172,8 @@ wmux browser storage set --key wmux_local --value updated --surface surface:3
 | `block.list` | `{ surfaceId?, limit? }` | recent command blocks |
 | `block.get` | `{ blockId }` | block metadata |
 | `block.rerun` | `{ blockId }` | writes command into terminal input |
+| `ai.explain` | `{ blockId }` | opens Explain panel and starts a streamed AI request |
+| `ai.suggest` | `{ prompt, surfaceId? }` | opens palette AI Suggestions for the active terminal |
 | `browser.navigate` | `{ surfaceId, url }` | ok |
 | `browser.snapshot` | `{ surfaceId, selector?, compact? }` | snapshot |
 | `browser.screenshot` | `{ surfaceId, path? }` | path/base64 |

@@ -1,6 +1,12 @@
 import { clipboard, contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type {
   AppUpdateStatus,
+  AiCancelRequest,
+  AiExplainRequest,
+  AiSettings,
+  AiSettingsUpdate,
+  AiStreamEvent,
+  AiSuggestRequest,
   BlockEvent,
   CompletionListDirectoryParams,
   CompletionListDirectoryResult,
@@ -34,6 +40,19 @@ const api = {
       const listener = (_event: IpcRendererEvent, payload: AppUpdateStatus): void => callback(payload);
       ipcRenderer.on("app:updateStatus", listener);
       return () => ipcRenderer.removeListener("app:updateStatus", listener);
+    }
+  },
+  ai: {
+    getSettings: (): Promise<AiSettings> => ipcRenderer.invoke("ai:getSettings"),
+    setSettings: (payload: AiSettingsUpdate): Promise<AiSettings> => ipcRenderer.invoke("ai:setSettings", payload),
+    explain: (payload: AiExplainRequest): Promise<{ requestId: string; blockId: string }> =>
+      ipcRenderer.invoke("ai:explain", payload),
+    suggest: (payload: AiSuggestRequest): Promise<{ requestId: string }> => ipcRenderer.invoke("ai:suggest", payload),
+    cancel: (payload: AiCancelRequest): Promise<{ ok: true }> => ipcRenderer.invoke("ai:cancel", payload),
+    onStream: (callback: (payload: AiStreamEvent) => void): (() => void) => {
+      const listener = (_event: IpcRendererEvent, payload: AiStreamEvent): void => callback(payload);
+      ipcRenderer.on("ai:stream", listener);
+      return () => ipcRenderer.removeListener("ai:stream", listener);
     }
   },
   config: {

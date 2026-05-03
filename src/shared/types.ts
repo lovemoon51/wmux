@@ -156,6 +156,52 @@ export type BlockEvent =
   | { type: "block:output"; surfaceId: string; blockId: BlockId; chunkBytes: number }
   | { type: "block:end"; surfaceId: string; blockId: BlockId; exitCode: number; endedAt: string };
 
+export type AiSettings = {
+  enabled: boolean;
+  endpoint: string;
+  model: string;
+  apiKey?: string;
+  apiKeySet?: boolean;
+  redactSecrets: boolean;
+  maxOutputBytes: number;
+};
+
+export type AiSettingsUpdate = Partial<Omit<AiSettings, "apiKeySet">>;
+
+export type AiExplainRequest = {
+  requestId: string;
+  blockId: BlockId;
+  surfaceId: string;
+};
+
+export type AiExplainResponse = {
+  requestId: string;
+  blockId: BlockId;
+  explanation: string;
+  suggestions?: string[];
+};
+
+export type AiSuggestRequest = {
+  requestId: string;
+  prompt: string;
+  cwd?: string;
+  shell?: ShellProfile;
+};
+
+export type AiSuggestResponse = {
+  requestId: string;
+  suggestions: string[];
+};
+
+export type AiCancelRequest = {
+  requestId: string;
+};
+
+export type AiStreamEvent =
+  | { requestId: string; type: "token"; token: string }
+  | { requestId: string; type: "done" }
+  | { requestId: string; type: "error"; error: string };
+
 export type TerminalInputModeEvent =
   | { type: "input:prompt-ready"; surfaceId: string; sessionId: string; source: "osc133" }
   | { type: "input:command-started"; surfaceId: string; sessionId: string; command?: string }
@@ -265,6 +311,8 @@ export type SocketRpcMethod =
   | "block.list"
   | "block.get"
   | "block.rerun"
+  | "ai.explain"
+  | "ai.suggest"
   | BrowserRpcMethod;
 
 export type SocketRpcRequest = {

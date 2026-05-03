@@ -6,7 +6,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { Activity, Code2, Minus, Plus } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
-import type { Block, BlockEvent, ShellProfile, Surface, TerminalInputModeEvent, WorkspaceStatus } from "@shared/types";
+import type { AiSettings, Block, BlockEvent, ShellProfile, Surface, TerminalInputModeEvent, WorkspaceStatus } from "@shared/types";
 import { BlockOverlay } from "./BlockOverlay";
 import { InputEditor } from "./InputEditor";
 import {
@@ -75,7 +75,10 @@ export function TerminalSurface({
   cwd,
   shell,
   onOpenUrl,
-  onOutput
+  onOutput,
+  aiSettings,
+  onExplainBlock,
+  onAiSuggest
 }: {
   surface: Surface;
   workspaceId: string;
@@ -83,6 +86,9 @@ export function TerminalSurface({
   shell: ShellProfile;
   onOpenUrl?: (url: string) => void;
   onOutput?: (surfaceId: string, output: string) => void;
+  aiSettings?: AiSettings | null;
+  onExplainBlock?: (block: Block) => void;
+  onAiSuggest?: (payload: { prompt: string; surfaceId: string; cwd: string; shell: ShellProfile }) => void;
 }): ReactElement {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<XTerm | null>(null);
@@ -808,6 +814,8 @@ export function TerminalSurface({
           onFocusBlock={focusBlock}
           onCopyBlock={copyBlock}
           onRerunBlock={rerunBlock}
+          onExplainBlock={onExplainBlock}
+          aiEnabled={Boolean(aiSettings?.enabled)}
         />
         {isModernInputCaptured && (
           <div className="terminalInputOverlay" onMouseDown={(event) => event.stopPropagation()}>
@@ -821,6 +829,11 @@ export function TerminalSurface({
               workspaceId={workspaceId}
               onChange={setInputDraft}
               onSubmit={submitInputDraft}
+              onAiSuggest={
+                aiSettings?.enabled
+                  ? (prompt) => onAiSuggest?.({ prompt, surfaceId: surface.id, cwd, shell })
+                  : undefined
+              }
               onInterrupt={interruptTerminal}
               onToggleCapture={() => dispatchModernInputEvent({ type: "manualToggle" })}
             />

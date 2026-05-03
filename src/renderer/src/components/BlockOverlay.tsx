@@ -1,4 +1,4 @@
-import { Copy, Pin, Play, RotateCcw } from "lucide-react";
+import { Bot, Copy, Pin, Play, RotateCcw } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import type { Block } from "@shared/types";
 import { formatBlockDuration, getBlockStatusClass, getBlockStatusLabel } from "../lib/blockPresentation";
@@ -11,6 +11,8 @@ export type BlockOverlayProps = {
   onFocusBlock: (blockId: string) => void;
   onCopyBlock: (block: Block, mode: "command" | "all") => void;
   onRerunBlock: (block: Block) => void;
+  onExplainBlock?: (block: Block) => void;
+  aiEnabled?: boolean;
 };
 
 type BlockGeometry = {
@@ -26,7 +28,9 @@ export function BlockOverlay({
   viewportY,
   onFocusBlock,
   onCopyBlock,
-  onRerunBlock
+  onRerunBlock,
+  onExplainBlock,
+  aiEnabled
 }: BlockOverlayProps): ReactElement | null {
   const [, setTick] = useState(0);
 
@@ -103,6 +107,17 @@ export function BlockOverlay({
                 <button className="blockActionButton" type="button" title="聚焦块" aria-label="聚焦块">
                   <Play size={12} />
                 </button>
+                {aiEnabled && block.status === "error" && (
+                  <button
+                    className="blockActionButton"
+                    type="button"
+                    title="Explain with AI"
+                    aria-label="Explain with AI"
+                    onClick={() => onExplainBlock?.(block)}
+                  >
+                    <Bot size={12} />
+                  </button>
+                )}
               </span>
             </div>
           </section>
