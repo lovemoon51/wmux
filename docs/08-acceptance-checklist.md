@@ -36,6 +36,9 @@
 - [x] terminal 链接可在内置 browser 打开。
 - [x] 设置页可配置 socket 安全模式。
 - [x] 快捷键覆盖 workspace、pane、surface 的高频操作。
+- [x] command palette、命令块、现代输入、智能补全、workflow、历史搜索、BYOK AI、状态栏和主题系统基础能力可用。
+- [x] Notebook surface 可通过 UI、命令面板、CLI/socket 和 `wmux.json` layout 创建。
+- [x] Notebook Markdown 正文保存到 `.wmux/notebooks/<notebookId>.md`，代码块可通过隐藏 PTY session 运行。
 
 ## 3. 体验验收
 
@@ -50,6 +53,7 @@
 - [x] Browser surface 分屏后保留当前 URL 和可见内容。
 - [x] Terminal 滚动条视觉与深色界面一致。
 - [x] 命令面板结果可通过键盘完整操作。
+- [x] Notebook surface 与 terminal/browser surface 可在同一 workspace/pane 体系中混排。
 
 ## 4. 安全验收
 
@@ -79,5 +83,12 @@
 
 - `npm run smoke:terminal` 覆盖 workspace CRUD、sidebar branch/port/notice/status、通知历史、agent 确认提示识别、split CRUD、surface tab、terminal 输入/clear/resize/profile、右键复制粘贴、browser CRUD、拖拽分屏、session restore、command palette、custom command 首次确认/取消、workspace layout、快捷键和性能 smoke。
 - `npm run smoke:terminal` 覆盖项目配置读取、`wmux config`、全局/项目命令合并，以及无 `wmux.json` 时读取 `.cmux/cmux.json` 的 cmux 兼容 fallback。
-- `npm run smoke:terminal` 覆盖 CLI 兼容命令：`--help`/`help`、`current-workspace`、`list-surfaces`、`focus-surface`、`send-surface`、`send-key-surface`、`new-split`、`status set/list/history/clear`。
+- `npm run smoke:terminal` 覆盖 CLI 兼容命令：`--help`/`help`、`current-workspace`、`list-surfaces`、`focus-surface`、`send-surface`、`send-key-surface`、`new-split`、`new-notebook`、`status set/list/history/clear`。
 - `npm run smoke:browser` 覆盖 socket 安全模式、terminal 链接内置 browser、browser automation navigate/list/wait/snapshot/selector snapshot/fill/type/press/click/eval/console/errors/cookies/storage/state inspection/screenshot、ambiguous target 和写文件路径校验。
+- `npm test` 覆盖 Notebook store、Markdown 拆分、未闭合 fenced code、代码块执行输入拼接、surface 元数据生成，以及 project config 中 notebook layout 的解析。
+
+## 7. 收尾 backlog
+
+- [ ] Notebook 专用导出、富 Markdown 渲染、运行结果持久化。
+- [ ] Notebook 代码块执行 UI e2e：填入代码块、点击 Run、断言输出与退出码。
+- [ ] React hooks lint warning 专项整理。
