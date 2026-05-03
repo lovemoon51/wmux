@@ -25,6 +25,7 @@ import {
   createElement,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type DragEvent,
@@ -2325,6 +2326,11 @@ export function App(): ReactElement {
 
   const projectCommands = projectConfig?.config.commands ?? [];
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
+  const workspaceInspectionCwdKey = workspaces.map((workspace) => workspace.cwd).join("\n");
+  const workspaceInspectionCwds = useMemo(
+    () => [...new Set(workspaceInspectionCwdKey.split("\n").filter(Boolean))],
+    [workspaceInspectionCwdKey]
+  );
   const availableThemes = [...builtInThemes, ...customThemes];
   const activeTheme = getThemeById(availableThemes, themeId);
   const workspacesRef = useRef(workspaces);
@@ -2378,7 +2384,7 @@ export function App(): ReactElement {
     }
 
     let isCancelled = false;
-    const uniqueCwds = [...new Set(workspaces.map((workspace) => workspace.cwd))];
+    const uniqueCwds = workspaceInspectionCwds;
 
     void Promise.all(
       uniqueCwds.map((cwd) =>
@@ -2417,7 +2423,7 @@ export function App(): ReactElement {
     return () => {
       isCancelled = true;
     };
-  }, [hasHydratedPersistedState, workspaces.map((workspace) => workspace.cwd).join("\n")]);
+  }, [hasHydratedPersistedState, workspaceInspectionCwds]);
 
   // 周期刷新 workspace 检视：拉取最新 branch / ports / PR 状态（gh CLI），60s 间隔
   useEffect(() => {
@@ -4933,6 +4939,8 @@ export function App(): ReactElement {
 
     window.addEventListener("keydown", handleGlobalKeyDown);
     return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+    // 全局快捷键绑定依赖当前渲染态，保持这个边界便于集中审计快捷键行为。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWorkspace, activeWorkspaceId, workspaces, workspaceNameDraft, editingWorkspaceId]);
 
   return (
@@ -6831,7 +6839,7 @@ function BrowserSurface({
         browserRuntimes.delete(surface.id);
       }
     };
-  }, [navigateBrowserRuntime, surface.id]);
+  }, [navigateBrowserRuntime, surface.id, waitForBrowserLoadState]);
 
   const loadHistoryEntry = (index: number): void => {
     const nextUrl = browserHistoryRef.current[index];

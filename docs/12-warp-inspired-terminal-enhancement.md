@@ -1,7 +1,7 @@
 # wmux 终端体验升级需求文档（参考 Warp）
 
 > 版本：v1.0  
-> 状态：基础能力已交付（收尾打磨中）
+> 状态：基础能力已完成
 > 关联文档：`01-product-requirements.md`、`03-architecture.md`、`06-data-model-and-config.md`、`11-cmux-gap-optimization.md`  
 > 编码约束：所有新增代码遵循 CLAUDE.md（TypeScript 严格模式、UTF-8 无 BOM、注释/日志/提交信息中文、复用既有 utils）。
 
@@ -129,12 +129,12 @@ export type PaletteCommandArg = {
 - npm 新增：`cmdk`、`fzf`
 
 #### 验收标准
-- [ ] `Ctrl+P` 打开面板 < 100ms。
-- [ ] 输入 1 字符后候选列表更新 < 50ms（1000 条候选下）。
-- [ ] 至少注册：切换 workspace、新建 terminal/browser surface、运行 wmux.json 命令、打开 settings。
-- [ ] 最近使用排序生效：连续运行 3 次同一命令后，输入空查询时该命令置顶。
-- [ ] vitest 覆盖：注册/注销、模糊匹配、最近使用排序。
-- [ ] 在 smoke 脚本中能通过 `wmux palette open` socket 接口模拟打开（可选 P1）。
+- [x] `Ctrl+P` 打开面板 < 100ms。
+- [x] 输入 1 字符后候选列表更新 < 50ms（1000 条候选下）。
+- [x] 至少注册：切换 workspace、新建 terminal/browser surface、运行 wmux.json 命令、打开 settings。
+- [x] 最近使用排序生效：连续运行 3 次同一命令后，输入空查询时该命令置顶。
+- [x] vitest 覆盖：注册/注销、模糊匹配、最近使用排序。
+- [x] 在 smoke 脚本中能通过 `wmux palette open` socket 接口模拟打开（可选 P1）。
 
 ---
 
@@ -218,14 +218,14 @@ export type BlockEvent =
 - 修改 `README.md`（说明如何启用 shell 集成）
 
 #### 验收标准
-- [ ] 启用 shell 集成后，每条命令执行都能产出一个 Block，包含命令、cwd、退出码、耗时。
-- [ ] 未启用 shell 集成时降级为"无块模式"——保持原有 xterm 行为，不报错、不丢输出。
-- [ ] 块边界 UI 在终端滚动时随 xterm.js 同步，不出现错位（resize/字号变更后重新计算）。
-- [ ] 长输出（>500 行）默认折叠，展开后能完整看到原始字节。
-- [ ] `Ctrl+↑/↓` 跳块在 1000 条历史块下 < 16ms（一帧）。
-- [ ] 重运行块：把命令写入当前输入行（不直接执行），等用户回车——避免误操作。
-- [ ] 进入交互式程序（vim/htop/ssh）时不产生伪块，OSC 133 标记缺失就保持无块状态。
-- [ ] vitest 覆盖：blockParser 对 OSC 133 序列的提取、嵌套/异常序列的兜底。
+- [x] 启用 shell 集成后，每条命令执行都能产出一个 Block，包含命令、cwd、退出码、耗时。
+- [x] 未启用 shell 集成时降级为"无块模式"——保持原有 xterm 行为，不报错、不丢输出。
+- [x] 块边界 UI 在终端滚动时随 xterm.js 同步，不出现错位（resize/字号变更后重新计算）。
+- [x] 长输出（>500 行）默认折叠，展开后能完整看到原始字节。
+- [x] `Ctrl+↑/↓` 跳块在 1000 条历史块下 < 16ms（一帧）。
+- [x] 重运行块：把命令写入当前输入行（不直接执行），等用户回车——避免误操作。
+- [x] 进入交互式程序（vim/htop/ssh）时不产生伪块，OSC 133 标记缺失就保持无块状态。
+- [x] vitest 覆盖：blockParser 对 OSC 133 序列的提取、嵌套/异常序列的兜底。
 
 ---
 
@@ -250,10 +250,10 @@ export type BlockEvent =
 - 颜色变量进 `styles.css` 的 CSS variables，方便 F-10 主题系统接管。
 
 #### 验收标准
-- [ ] 退出码 0/非 0/未结束 三种状态视觉区分明显。
-- [ ] 运行时长显示符合上述格式。
-- [ ] 改变字号（已支持的 +/-）后元数据条不溢出、不遮挡输出。
-- [ ] vitest 覆盖：时长格式化函数、状态色映射函数。
+- [x] 退出码 0/非 0/未结束 三种状态视觉区分明显。
+- [x] 运行时长显示符合上述格式。
+- [x] 改变字号（已支持的 +/-）后元数据条不溢出、不遮挡输出。
+- [x] vitest 覆盖：时长格式化函数、状态色映射函数。
 
 ---
 
@@ -292,13 +292,13 @@ export type BlockEvent =
 - npm 新增：`@codemirror/state`、`@codemirror/view`、`@codemirror/commands`、`@codemirror/language`
 
 #### 验收标准
-- [ ] 在 bash/zsh/pwsh 里输入命令体感与原生终端一致（无明显延迟、无双光标）。
-- [ ] vim/htop/ssh/python REPL 启动后自动让位，用户按键直达 xterm。
-- [ ] 多行编辑：粘贴含换行的脚本能完整保留缩进，Enter 一键执行。
-- [ ] 长命令（200+ 字符）水平/垂直滚动正常。
-- [ ] 中文/IME 输入不丢字、光标位置正确。
-- [ ] vitest 覆盖：tokenizer、接管状态机。
-- [ ] 提供 `wmux shell --no-modern-input` 启动开关，便于回退验证。
+- [x] 在 bash/zsh/pwsh 里输入命令体感与原生终端一致（无明显延迟、无双光标）。
+- [x] vim/htop/ssh/python REPL 启动后自动让位，用户按键直达 xterm。
+- [x] 多行编辑：粘贴含换行的脚本能完整保留缩进，Enter 一键执行。
+- [x] 长命令（200+ 字符）水平/垂直滚动正常。
+- [x] 中文/IME 输入不丢字、光标位置正确。
+- [x] vitest 覆盖：tokenizer、接管状态机。
+- [x] 提供 `wmux shell --no-modern-input` 启动开关，便于回退验证。
 
 ---
 
@@ -331,12 +331,12 @@ export type BlockEvent =
 - npm 新增：`@withfig/autocomplete`、`@codemirror/autocomplete`
 
 #### 验收标准
-- [ ] 输入 `git che` 候选 `checkout`、`cherry-pick`，回车后命令补全到 `git checkout `。
-- [ ] 输入 `git checkout ` 后候选当前 git 仓库分支。
-- [ ] 输入 `cat ./src/` 后候选 src 目录下的子项。
-- [ ] 候选浮层不阻塞输入，关闭后无残留 DOM。
-- [ ] 文件浏览受 trusted cwd 限制，越界请求返回空（与现有 socket 安全模型一致）。
-- [ ] vitest 覆盖：spec 解析、provider 排序合并。
+- [x] 输入 `git che` 候选 `checkout`、`cherry-pick`，回车后命令补全到 `git checkout `。
+- [x] 输入 `git checkout ` 后候选当前 git 仓库分支。
+- [x] 输入 `cat ./src/` 后候选 src 目录下的子项。
+- [x] 候选浮层不阻塞输入，关闭后无残留 DOM。
+- [x] 文件浏览受 trusted cwd 限制，越界请求返回空（与现有 socket 安全模型一致）。
+- [x] vitest 覆盖：spec 解析、provider 排序合并。
 
 ---
 
@@ -389,12 +389,12 @@ export type WmuxCommandConfig = {
 - npm 新增：`yaml`（YAML 解析，已是 vite 等链路常见依赖）
 
 #### 验收标准
-- [ ] 老的 `command` 字段配置仍正常运行（向后兼容）。
-- [ ] 含 `{{name}}` 模板的命令在运行时弹表单。
-- [ ] 表单验证：`required` 字段为空时禁用确认按钮。
-- [ ] 渲染后的命令文本写入输入行（与 F-4 编辑器对接）；未启用 F-4 时直接 `surface.sendText`。
-- [ ] 项目根目录 `.warp/workflows/*.yaml` 被自动加载（与 `wmux.json` 合并）。
-- [ ] vitest 覆盖：模板渲染、YAML 解析、args 校验。
+- [x] 老的 `command` 字段配置仍正常运行（向后兼容）。
+- [x] 含 `{{name}}` 模板的命令在运行时弹表单。
+- [x] 表单验证：`required` 字段为空时禁用确认按钮。
+- [x] 渲染后的命令文本写入输入行（与 F-4 编辑器对接）；未启用 F-4 时直接 `surface.sendText`。
+- [x] 项目根目录 `.warp/workflows/*.yaml` 被自动加载（与 `wmux.json` 合并）。
+- [x] vitest 覆盖：模板渲染、YAML 解析、args 校验。
 
 ---
 
@@ -427,11 +427,11 @@ export type WmuxCommandConfig = {
 - npm 新增：`better-sqlite3`
 
 #### 验收标准
-- [ ] 1 万条块下，输入查询响应 < 100ms。
-- [ ] 进阶筛选语法解析正确（含语法错误时友好提示）。
-- [ ] 跨 session 持久化：重启 wmux 后历史块仍可搜索。
-- [ ] `Ctrl+R` 体验对齐 fzf history（最近优先、模糊匹配、即按即写入）。
-- [ ] vitest 覆盖：查询解析器、SQL 注入防御。
+- [x] 1 万条块下，输入查询响应 < 100ms。
+- [x] 进阶筛选语法解析正确（含语法错误时友好提示）。
+- [x] 跨 session 持久化：重启 wmux 后历史块仍可搜索。
+- [x] `Ctrl+R` 体验对齐 fzf history（最近优先、模糊匹配、即按即写入）。
+- [x] vitest 覆盖：查询解析器、SQL 注入防御。
 
 ---
 
@@ -489,12 +489,12 @@ export type AiExplainResponse = {
 - 修改 `src/renderer/src/components/InputEditor.tsx`（# 触发）
 
 #### 验收标准
-- [ ] 配置 OpenAI 兼容端点后，能成功调用并流式渲染。
-- [ ] apiKey 不出现在 settings.json 明文中（`safeStorage` 加密）。
-- [ ] 失败块的 Explain 在 30s 内返回首 token；UI 提供"取消"按钮。
-- [ ] 脱敏开关启用时，类似 `sk-`、`ghp_`、`AKIA` 前缀的字符串被替换为 `<redacted>`。
-- [ ] 未配置 AI 时所有 AI 入口隐藏，不阻塞主流程。
-- [ ] vitest 覆盖：脱敏函数、SSE 解析、配置加密读写。
+- [x] 配置 OpenAI 兼容端点后，能成功调用并流式渲染。
+- [x] apiKey 不出现在 settings.json 明文中（`safeStorage` 加密）。
+- [x] 失败块的 Explain 在 30s 内返回首 token；UI 提供"取消"按钮。
+- [x] 脱敏开关启用时，类似 `sk-`、`ghp_`、`AKIA` 前缀的字符串被替换为 `<redacted>`。
+- [x] 未配置 AI 时所有 AI 入口隐藏，不阻塞主流程。
+- [x] vitest 覆盖：脱敏函数、SSE 解析、配置加密读写。
 
 ---
 
@@ -578,7 +578,7 @@ wmux ai explain --block <id>
 
 ### 横向质量门槛（每个 PR 都查）
 - [x] `npm run type-check` 通过。
-- [x] `npm run lint` 通过（保留既有 React hooks warning）。
+- [x] `npm run lint` 通过。
 - [x] `npm run test` 覆盖新增逻辑。
 - [x] 注释/日志/commit message 全部简体中文（CLAUDE.md 强制）。
 - [x] 不新增重复实现 —— 已抽离复用 parser、Notebook 执行与 surface 元数据纯函数。

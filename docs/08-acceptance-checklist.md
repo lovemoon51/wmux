@@ -87,8 +87,8 @@
 - `npm run smoke:browser` 覆盖 socket 安全模式、terminal 链接内置 browser、browser automation navigate/list/wait/snapshot/selector snapshot/fill/type/press/click/eval/console/errors/cookies/storage/state inspection/screenshot、ambiguous target 和写文件路径校验。
 - `npm test` 覆盖 Notebook store、Markdown 拆分、未闭合 fenced code、代码块执行输入拼接、surface 元数据生成，以及 project config 中 notebook layout 的解析。
 
-## 7. 收尾 backlog
+## 7. 后续增强 backlog（不阻塞本轮 PRD）
 
-- [ ] Notebook 专用导出、富 Markdown 渲染、运行结果持久化。
-- [ ] Notebook 代码块执行 UI e2e：填入代码块、点击 Run、断言输出与退出码。
-- [ ] React hooks lint warning 专项整理。
+- Notebook 专用导出、富 Markdown 渲染、运行结果持久化。
+- Notebook 代码块执行 UI e2e：填入代码块、点击 Run、断言输出与退出码。
+- React hooks lint 专项整理。
