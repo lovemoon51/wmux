@@ -267,7 +267,7 @@ async function runSettingsSmoke(window) {
   await window.getByRole("button", { name: "Settings" }).click();
   await window.getByLabel("Settings panel").waitFor({ timeout: 15_000 });
   await window.getByLabel("Socket security mode").selectOption("token");
-  await window.getByRole("button", { name: "Save" }).click();
+  await window.getByRole("button", { name: "Save", exact: true }).click();
   await window.getByText("restart required").waitFor({ timeout: 15_000 });
   log("ok settings socket security");
 }
@@ -729,6 +729,7 @@ async function runCliSocketSmoke(window) {
     "surface.list",
     "surface.createTerminal",
     "surface.createBrowser",
+    "surface.createNotebook",
     "surface.focus",
     "surface.sendKey",
     "status.set",
@@ -949,6 +950,40 @@ async function runCliSocketSmoke(window) {
   }
   await runCliCommand(["surface", "focus", "--surface", "surface-agent"]);
   log("ok wmux new-browser");
+
+  const createNotebookOutput = await runCliCommand([
+    "new-notebook",
+    "--name",
+    "Smoke Notes",
+    "--notebook-id",
+    "smoke-notes",
+    "--json"
+  ]);
+  const createdNotebook = JSON.parse(createNotebookOutput);
+  const createdNotebookSurface = createdNotebook.surface;
+  if (
+    createdNotebookSurface?.id !== createdNotebook.surfaceId ||
+    createdNotebookSurface?.type !== "notebook" ||
+    createdNotebookSurface?.name !== "Smoke Notes" ||
+    createdNotebookSurface?.notebookId !== "smoke-notes"
+  ) {
+    throw new Error(`wmux new-notebook did not return Smoke Notes notebook surface: ${createNotebookOutput}`);
+  }
+  const notebookSurfaceOutput = await runCliCommand(["surface", "list", "--json"]);
+  const notebookSurfaceList = JSON.parse(notebookSurfaceOutput);
+  if (
+    !notebookSurfaceList.surfaces?.some(
+      (surface) =>
+        surface.surfaceId === createdNotebookSurface.id &&
+        surface.type === "notebook" &&
+        surface.name === "Smoke Notes" &&
+        surface.notebookId === "smoke-notes"
+    )
+  ) {
+    throw new Error(`wmux surface list did not include Smoke Notes notebook surface: ${notebookSurfaceOutput}`);
+  }
+  await runCliCommand(["surface", "focus", "--surface", "surface-agent"]);
+  log("ok wmux new-notebook");
 
   const directedBrowserSendFailure = await runCliCommandFailure([
     "send-surface",

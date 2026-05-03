@@ -55,6 +55,11 @@ Runtime settings: app userData/settings.json
                         "type": "browser",
                         "name": "Preview",
                         "url": "http://localhost:3000"
+                      },
+                      {
+                        "type": "notebook",
+                        "name": "Runbook",
+                        "notebookId": "dev-runbook"
                       }
                     ]
                   }
@@ -104,6 +109,12 @@ Runtime settings: app userData/settings.json
 ```
 
 `command` 保持向后兼容：无参数命令仍会直接写入终端并执行。`commandTemplate` 用于参数化命令，优先于 `command`，模板变量格式为 `{{name}}`。配置带 `args` 或 `commandTemplate` 时会作为 Workflow 出现在命令面板，提交参数后只写入当前终端输入草稿，不会自动追加换行或执行。
+
+Workspace layout 的 `surfaces` 支持三类：
+
+- `terminal`：可带 `command`，创建后写入/执行终端命令。
+- `browser`：可带 `url`，用于内置浏览器预览和自动化。
+- `notebook`：可带 `notebookId`，正文落到当前 workspace 的 `.wmux/notebooks/<notebookId>.md`；若未配置 `notebookId`，运行时会生成本地 id。
 
 `args` 字段元素结构：
 
@@ -201,6 +212,8 @@ create table surfaces (
 );
 ```
 
+`metadata_json` 按 surface 类型保存可恢复的附加信息：`terminal` 记录终端启动上下文，`browser` 记录当前 URL 等浏览器状态，`notebook` 记录 `notebookId`。Notebook 正文不写入 SQLite，而是保存在当前 workspace 的 `.wmux/notebooks/<notebookId>.md`。
+
 ### statuses
 
 ```sql
@@ -235,6 +248,7 @@ create table command_history (
 
 - PTY process handle。
 - Browser WebContents handle。
+- Notebook 隐藏 PTY 运行会话。
 - Socket client connection。
 - 瞬时 hover/focus UI 状态。
 - 未持久化的 terminal alternate screen 内容。
@@ -249,6 +263,7 @@ create table command_history (
 - Surface 名称、类型、cwd。
 - Terminal scrollback 快照，尽力而为。
 - Browser URL 和基础 history。
+- Notebook surface 元数据，以及 `.wmux/notebooks/*.md` 中已保存的 Markdown 正文。
 - Status 元信息。
 
 不恢复：
@@ -256,3 +271,4 @@ create table command_history (
 - 已退出或运行中的真实进程。
 - vim/tmux/agent 的运行时内存状态。
 - 未保存的 shell 当前命令执行状态。
+- Notebook 编辑器里尚未保存的草稿。

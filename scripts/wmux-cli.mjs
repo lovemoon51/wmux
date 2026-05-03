@@ -40,6 +40,7 @@ function printUsage() {
   wmux rename-workspace --workspace <id> --name <name> [--json]
   wmux new-terminal [--pane <id>] [--name <name>] [--cwd <path>] [--json]
   wmux new-browser [--pane <id>] [--name <name>] [--url <url>] [--json]
+  wmux new-notebook [--pane <id>] [--name <name>] [--notebook-id <id>] [--json]
   wmux new-split --direction horizontal|vertical [--json]
   wmux surface list [--workspace <id>] [--json]
   wmux surface focus --surface <id> [--json]
@@ -126,6 +127,8 @@ const optionFlagsWithValues = new Set([
   "--limit",
   "--name",
   "--notice",
+  "--notebook",
+  "--notebook-id",
   "--out",
   "--pane",
   "--query",
@@ -699,6 +702,29 @@ function createRequest() {
     };
   }
 
+  if (command === "new-notebook") {
+    const paneId = parseOption("--pane");
+    const name = parseOption("--name");
+    const notebookId = parseOption("--notebook-id") ?? parseOption("--notebook");
+    if (paneId !== undefined && (!paneId || paneId.startsWith("--"))) {
+      throw cliError("new-notebook 的 --pane 需要 pane id");
+    }
+    if (name !== undefined && (!name || name.startsWith("--"))) {
+      throw cliError("new-notebook 的 --name 需要名称");
+    }
+    if (notebookId !== undefined && (!notebookId || notebookId.startsWith("--"))) {
+      throw cliError("new-notebook 的 --notebook-id 需要 notebook id");
+    }
+    return {
+      method: "surface.createNotebook",
+      params: {
+        ...(paneId ? { paneId } : {}),
+        ...(name ? { name } : {}),
+        ...(notebookId ? { notebookId } : {})
+      }
+    };
+  }
+
   if (command === "new-split") {
     const direction = parseOption("--direction");
     if (direction !== "horizontal" && direction !== "vertical") {
@@ -1179,6 +1205,11 @@ function printResult(result) {
 
   if (command === "new-browser") {
     console.log(`created ${result?.surface?.name ?? result?.surface?.id ?? "browser"}`);
+    return;
+  }
+
+  if (command === "new-notebook") {
+    console.log(`created ${result?.surface?.name ?? result?.surface?.id ?? "notebook"}`);
     return;
   }
 

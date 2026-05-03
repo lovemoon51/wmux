@@ -513,11 +513,11 @@ export type AiExplainResponse = {
 - 可批量导入 [iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes) 已转好的 JSON。
 - 关键改动：新增 `src/renderer/src/lib/themes/`、`src/renderer/src/components/ThemePicker.tsx`、修改 `styles.css` 用 variables。
 
-### F-11 Notebooks Surface（远期）
+### F-11 Notebooks Surface（远期，基础能力已落地）
 
 - 新增第三种 surface 类型：`type: "notebook"`，承载 Markdown + 可执行代码块。
 - 数据落到 `.wmux/notebooks/<id>.md`，代码块运行时复用 PTY 通道（隐藏 surface）。
-- 不在 v1.0 范围，记录为远期 backlog。
+- 已落地基础能力：标题栏/命令面板/CLI/socket 创建入口、Markdown 编辑与预览、代码块隐藏 PTY 运行、`.wmux/notebooks` 读写。后续增强保留为远期 backlog，例如 Notebook 专用导出、富 Markdown 渲染、运行结果持久化。
 
 ---
 
@@ -541,13 +541,15 @@ export type SocketRpcMethod =
   | "block.get"
   | "block.rerun"
   | "ai.explain"
-  | "ai.suggest";
+  | "ai.suggest"
+  | "surface.createNotebook";
 ```
 
 CLI 子命令同步增加（更新 `docs/05-cli-socket-api.md`）：
 ```bash
 wmux palette open
 wmux palette run "Start Dev"
+wmux new-notebook --name "Runbook" --notebook-id runbook
 wmux block list --surface <id> --limit 50
 wmux block rerun --block <id>
 wmux ai explain --block <id>
@@ -616,7 +618,7 @@ wmux ai explain --block <id>
 - **强制中文**：所有注释、日志、commit、PR 描述都用简体中文（CLAUDE.md 已规定）。
 - **复用优先**：动手前 grep 现有实现 —— 例如 OSC 解析复用 `oscNotifications.ts` 的工具函数；workspace 状态机复用 `workspaceStatusEvents.ts` 的事件模型。
 - **smoke 兜底**：每个 F-x 至少新增 1 条 vitest，跨进程的端到端流程加到 `scripts/smoke-*.mjs`。
-- **schema 文档同步**：F-2、F-6、F-8 改动 schema 时同步更新 `docs/06-data-model-and-config.md` 与 `docs/05-cli-socket-api.md`。
+- **schema 文档同步**：F-2、F-6、F-8、F-11 改动 schema 时同步更新 `docs/06-data-model-and-config.md` 与 `docs/05-cli-socket-api.md`。
 - **不要破坏既有 P0**：cmux 对齐能力（workspace、surface、CLI/socket、wmux.json）在本需求中**只增不改**。
 
 ---

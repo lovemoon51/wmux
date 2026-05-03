@@ -70,14 +70,13 @@ wmux surface list
 wmux surface list --workspace workspace:1
 wmux new-terminal --name "Tests" --cwd .
 wmux new-browser --url http://localhost:3000 --name Preview
-wmux split right
-wmux split down
+wmux new-notebook --name "Runbook" --notebook-id runbook
+wmux new-split --direction horizontal
+wmux new-split --direction vertical
 wmux surface focus --surface surface:2
-wmux close-surface --surface surface:2
 wmux current-workspace
 wmux list-surfaces
 wmux focus-surface --surface surface:2
-wmux new-split --direction vertical
 ```
 
 ### 输入
@@ -87,7 +86,6 @@ wmux send "npm test\n"
 wmux send-key enter
 wmux send-surface --surface surface:2 "npm test\n"
 wmux send-key-surface --surface surface:2 enter
-wmux paste
 ```
 
 `send-key` P0 支持 `enter`、`tab`、`escape`/`esc`、`backspace`、`delete`、方向键 `up`/`down`/`left`/`right`，以及 `ctrl+c`、`ctrl+d`、`ctrl+l`。
@@ -159,8 +157,9 @@ wmux browser storage set --key wmux_local --value updated --surface surface:3
 | `workspace.close` | `{ workspaceId }` | closed workspace |
 | `workspace.rename` | `{ workspaceId, name }` | renamed workspace |
 | `surface.list` | `{ workspaceId? }` | surface list |
-| `surface.createTerminal` | `{ paneId?, name?, cwd?, command? }` | surface |
+| `surface.createTerminal` | `{ paneId?, name?, cwd? }` | surface |
 | `surface.createBrowser` | `{ paneId?, name?, url? }` | surface |
+| `surface.createNotebook` | `{ paneId?, name?, notebookId? }` | notebook surface |
 | `surface.split` | `{ direction }` | pane/surface ids |
 | `surface.focus` | `{ surfaceId }` | selected surface ids |
 | `surface.sendText` | `{ surfaceId?, text }` | ok |
@@ -191,6 +190,8 @@ wmux browser storage set --key wmux_local --value updated --surface surface:3
 | `browser.storage.set` | `{ surfaceId?, paneId?, workspaceId?, active?, area?, key, value }` | ok |
 
 `config.list` 返回的 `commands` 保持兼容旧 `command` 字段；参数化 Workflow 命令会额外包含 `commandTemplate` 与 `args`。项目根目录 `.warp/workflows/*.yaml` 会作为 `workflow` 来源合并进命令列表。通过 `palette.run` 触发这类命令时，renderer 会打开参数表单并把渲染结果写入当前终端输入草稿，不会直接执行。
+
+`surface.createNotebook` 会在目标 pane 创建 `type: "notebook"` surface，并把正文读写到当前 workspace 的 `.wmux/notebooks/<notebookId>.md`。若省略 `notebookId`，renderer 会生成稳定的本地 id；Notebook 内的代码块运行复用隐藏 PTY session，不会抢占当前可见 terminal surface。
 
 ## 7. 错误码
 
