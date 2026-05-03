@@ -27,6 +27,7 @@ import {
   toPublicAiSettings,
   updateAppSettings
 } from "./settingsStore";
+import { loadNotebook, saveNotebook } from "./notebookStore";
 import {
   createRpcError,
   getDefaultSocketPath,
@@ -42,6 +43,10 @@ import type {
   AiSettingsUpdate,
   AiSuggestRequest,
   AiStreamEvent,
+  NotebookLoadParams,
+  NotebookLoadResult,
+  NotebookSaveParams,
+  NotebookSaveResult,
   PersistedAppState,
   PullRequestState,
   PullRequestSummary,
@@ -336,7 +341,16 @@ function parseSurfaceConfig(value: unknown, errors: string[], context: string): 
     };
   }
 
-  errors.push(`${context} 的 type 必须是 terminal 或 browser`);
+  if (value.type === "notebook") {
+    return {
+      type: "notebook",
+      name: readOptionalString(value, "name"),
+      notebookId: readOptionalString(value, "notebookId"),
+      focus: readOptionalBoolean(value, "focus")
+    };
+  }
+
+  errors.push(`${context} 的 type 必须是 terminal、browser 或 notebook`);
   return null;
 }
 
@@ -989,6 +1003,29 @@ app.whenReady().then(() => {
     return { requestId: request.requestId };
   });
   ipcMain.handle("config:loadProjectConfig", () => loadProjectConfig());
+  ipcMain.handle(
+    "notebook:load",
+    async (_event, params: NotebookLoadParams): Promise<NotebookLoadResult> => {
+      if (!isRecord(params) || typeof params.cwd !== "string" || typeof params.notebookId !== "string") {
+        throw createRpcError("BAD_REQUEST", "notebook.load 需要 cwd 和 notebookId");
+      }
+      return loadNotebook(params.cwd, params.notebookId, typeof params.title === "string" ? params.title : undefined);
+    }
+  );
+  ipcMain.handle(
+    "notebook:save",
+    async (_event, params: NotebookSaveParams): Promise<NotebookSaveResult> => {
+      if (
+        !isRecord(params) ||
+        typeof params.cwd !== "string" ||
+        typeof params.notebookId !== "string" ||
+        typeof params.content !== "string"
+      ) {
+        throw createRpcError("BAD_REQUEST", "notebook.save 需要 cwd、notebookId 和 content");
+      }
+      return saveNotebook(params.cwd, params.notebookId, params.content);
+    }
+  );
   ipcMain.handle("workspace:loadState", async (): Promise<PersistedAppState | null> => {
     try {
       return JSON.parse(await readFile(getStatePath(), "utf8")) as PersistedAppState;

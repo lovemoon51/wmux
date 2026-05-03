@@ -12,6 +12,10 @@ import type {
   CompletionListDirectoryResult,
   CompletionListGitBranchesParams,
   CompletionListGitBranchesResult,
+  NotebookLoadParams,
+  NotebookLoadResult,
+  NotebookSaveParams,
+  NotebookSaveResult,
   PersistedAppState,
   ShellProfile,
   ShellProfileOption,
@@ -64,6 +68,10 @@ const api = {
   },
   config: {
     loadProjectConfig: (): Promise<WmuxProjectConfigResult> => ipcRenderer.invoke("config:loadProjectConfig")
+  },
+  notebook: {
+    load: (payload: NotebookLoadParams): Promise<NotebookLoadResult> => ipcRenderer.invoke("notebook:load", payload),
+    save: (payload: NotebookSaveParams): Promise<NotebookSaveResult> => ipcRenderer.invoke("notebook:save", payload)
   },
   workspace: {
     loadState: (): Promise<PersistedAppState | null> => ipcRenderer.invoke("workspace:loadState"),

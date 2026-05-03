@@ -1,6 +1,6 @@
 export type WorkspaceStatus = "idle" | "running" | "attention" | "success" | "error";
 
-export type SurfaceType = "terminal" | "browser";
+export type SurfaceType = "terminal" | "browser" | "notebook";
 
 export type ShellProfile = "auto" | "pwsh" | "powershell" | "cmd" | "bash" | "zsh";
 
@@ -26,6 +26,12 @@ export type WmuxSurfaceConfig =
       type: "browser";
       name?: string;
       url?: string;
+      focus?: boolean;
+    }
+  | {
+      type: "notebook";
+      name?: string;
+      notebookId?: string;
       focus?: boolean;
     };
 
@@ -303,6 +309,7 @@ export type SocketRpcMethod =
   | "surface.list"
   | "surface.createTerminal"
   | "surface.createBrowser"
+  | "surface.createNotebook"
   | "surface.split"
   | "surface.focus"
   | "surface.sendText"
@@ -448,6 +455,12 @@ export type SurfaceCreateBrowserParams = {
   url?: string;
 };
 
+export type SurfaceCreateNotebookParams = {
+  paneId?: string;
+  name?: string;
+  notebookId?: string;
+};
+
 export type SurfaceFocusParams = {
   surfaceId: string;
 };
@@ -466,6 +479,36 @@ export type SurfaceSummary = {
   name: string;
   status: WorkspaceStatus;
   subtitle?: string;
+  notebookId?: string;
+};
+
+export type NotebookLoadParams = {
+  cwd: string;
+  notebookId: string;
+  title?: string;
+};
+
+export type NotebookLoadResult = {
+  notebookId: string;
+  path: string;
+  relativePath: string;
+  content: string;
+  exists: boolean;
+  updatedAt?: string;
+};
+
+export type NotebookSaveParams = {
+  cwd: string;
+  notebookId: string;
+  content: string;
+};
+
+export type NotebookSaveResult = {
+  notebookId: string;
+  path: string;
+  relativePath: string;
+  bytes: number;
+  updatedAt: string;
 };
 
 export type BrowserRpcMethod =
@@ -664,6 +707,7 @@ export type Surface = {
   name: string;
   subtitle?: string;
   status: WorkspaceStatus;
+  notebookId?: string;
 };
 
 export type WorkspaceStatusEvent = {

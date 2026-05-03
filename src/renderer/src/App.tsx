@@ -1,6 +1,7 @@
 import {
   Bell,
   Activity,
+  BookOpen,
   ChevronLeft,
   ChevronRight,
   Command,
@@ -87,6 +88,7 @@ import type {
   StatusSetParams,
   Surface,
   SurfaceCreateBrowserParams,
+  SurfaceCreateNotebookParams,
   SurfaceCreateTerminalParams,
   SurfaceFocusParams,
   SurfaceListParams,
@@ -122,6 +124,7 @@ import {
   withWorkspaceStatusEvent
 } from "./lib/workspaceStatusEvents";
 import { TerminalSurface, setTerminalSearchHandlers, writeTerminalInputDraft } from "./components/TerminalSurface";
+import { NotebookSurface } from "./components/NotebookSurface";
 import { TerminalStatusBar, type TerminalStatusBarProps } from "./components/StatusBar";
 import {
   createWorkflowArgDefaults,
@@ -293,6 +296,26 @@ function createBrowserSurface(options: { name?: string; url?: string } = {}): Su
     subtitle: url,
     status: "idle"
   };
+}
+
+function createNotebookSurface(options: { name?: string; notebookId?: string } = {}): Surface {
+  const number = nextSurfaceNumber++;
+  const notebookId = normalizeNotebookId(options.notebookId, number);
+  return {
+    id: `surface-notebook-${notebookId}`,
+    type: "notebook",
+    name: options.name?.trim() || `Notebook ${number}`,
+    subtitle: `.wmux/notebooks/${notebookId}.md`,
+    status: "idle",
+    notebookId
+  };
+}
+
+function normalizeNotebookId(value: string | undefined, number: number): string {
+  const fallback = `notebook-${Date.now()}-${number}`;
+  const raw = (value?.trim() || fallback).replace(/^surface-notebook-/, "");
+  const sanitized = raw.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 128);
+  return /^[a-zA-Z0-9]/.test(sanitized) ? sanitized : fallback;
 }
 
 function createPaneWithTerminal(): { paneId: string; surface: Surface; pane: Workspace["panes"][string] } {
@@ -691,15 +714,21 @@ function getWorkspaceCommandIdentity(command: WmuxCommandConfig): { name: string
 
 function createConfiguredSurface(config: WmuxSurfaceConfig, fallbackName: string): Surface {
   const number = nextSurfaceNumber++;
-  const isTerminal = config.type === "terminal";
-  const fallbackSubtitle = isTerminal ? "PowerShell" : (config.url ?? "about:blank");
+  const notebookId = config.type === "notebook" ? normalizeNotebookId(config.notebookId, number) : undefined;
+  const fallbackSubtitle =
+    config.type === "terminal"
+      ? "PowerShell"
+      : config.type === "browser"
+        ? (config.url ?? "about:blank")
+        : `.wmux/notebooks/${notebookId}.md`;
 
   return {
-    id: `surface-${config.type}-${Date.now()}-${number}`,
+    id: notebookId ? `surface-notebook-${notebookId}` : `surface-${config.type}-${Date.now()}-${number}`,
     type: config.type,
     name: config.name?.trim() || fallbackName,
     subtitle: fallbackSubtitle,
-    status: config.type === "terminal" && config.command ? "running" : "idle"
+    status: config.type === "terminal" && config.command ? "running" : "idle",
+    ...(notebookId ? { notebookId } : {})
   };
 }
 
@@ -726,7 +755,9 @@ function createWorkspaceFromCommand(command: WmuxCommandConfig): WorkspaceComman
     const nextSurfaceIds = surfaceConfigs.map((surfaceConfig, surfaceIndex) => {
       const surface = createConfiguredSurface(
         surfaceConfig,
-        `${surfaceConfig.type === "browser" ? "Browser" : "Terminal"} ${surfaceIndex + 1}`
+        `${surfaceConfig.type === "browser" ? "Browser" : surfaceConfig.type === "notebook" ? "Notebook" : "Terminal"} ${
+          surfaceIndex + 1
+        }`
       );
       surfaces[surface.id] = surface;
 
@@ -924,6 +955,7 @@ const socketCapabilities: SocketRpcMethod[] = [
   "surface.list",
   "surface.createTerminal",
   "surface.createBrowser",
+  "surface.createNotebook",
   "surface.split",
   "surface.focus",
   "surface.sendText",
@@ -2034,7 +2066,8 @@ function createSurfaceSummaries(workspaces: Workspace[], activeWorkspaceId: stri
           active: workspace.id === activeWorkspaceId && workspace.activePaneId === pane.id && pane.activeSurfaceId === surface.id,
           name: surface.name,
           status: surface.status,
-          subtitle: surface.subtitle
+          subtitle: surface.subtitle,
+          notebookId: surface.type === "notebook" ? (surface.notebookId ?? surface.id.replace(/^surface-notebook-/, "")) : undefined
         }))
     )
   );
@@ -3265,13 +3298,22 @@ export function App(): ReactElement {
       {
         id: "surface:new-browser",
         category: "surface",
-        title: "New browser surface",
-        subtitle: "Add a browser to the active pane",
-        shortcut: "Ctrl+Shift+B",
-        run: () => handleAddBrowserSurface(activeWorkspace.activePaneId)
-      },
-      {
-        id: "surface:split-horizontal",
+            title: "New browser surface",
+            subtitle: "Add a browser to the active pane",
+            shortcut: "Ctrl+Shift+B",
+            run: () => handleAddBrowserSurface(activeWorkspace.activePaneId)
+          },
+          {
+            id: "surface:new-notebook",
+            category: "surface",
+            title: "New notebook surface",
+            subtitle: "Create a Markdown notebook in .wmux/notebooks",
+            shortcut: "Ctrl+Shift+M",
+            icon: "notebook",
+            run: () => handleAddNotebookSurface(activeWorkspace.activePaneId)
+          },
+          {
+            id: "surface:split-horizontal",
         category: "surface",
         title: "Split horizontally",
         subtitle: "Create a side-by-side pane",
@@ -3728,6 +3770,73 @@ export function App(): ReactElement {
           historyIndex: 0,
           url: surface.subtitle ?? "about:blank"
         });
+        setWorkspaces((items) =>
+          items.map((workspace) =>
+            workspace.id === currentWorkspace.id
+              ? {
+                  ...workspace,
+                  activePaneId: paneId,
+                  panes: {
+                    ...workspace.panes,
+                    [paneId]: {
+                      ...pane,
+                      surfaceIds: [...pane.surfaceIds, surface.id],
+                      activeSurfaceId: surface.id
+                    }
+                  },
+                  surfaces: {
+                    ...workspace.surfaces,
+                    [surface.id]: surface
+                  }
+                }
+              : workspace
+          )
+        );
+
+        window.wmux?.socket.respond(
+          createSocketSuccessResponse(request.id, {
+            workspaceId: currentWorkspace.id,
+            paneId,
+            surfaceId: surface.id,
+            surface
+          })
+        );
+        return;
+      }
+
+      if (request.method === "surface.createNotebook") {
+        const params = (request.params ?? {}) as Partial<SurfaceCreateNotebookParams>;
+        if (params.paneId !== undefined && (typeof params.paneId !== "string" || !params.paneId.trim())) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "BAD_REQUEST", "surface.createNotebook paneId 不能为空")
+          );
+          return;
+        }
+        if (params.name !== undefined && (typeof params.name !== "string" || !params.name.trim())) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "BAD_REQUEST", "surface.createNotebook name 不能为空")
+          );
+          return;
+        }
+        if (params.notebookId !== undefined && (typeof params.notebookId !== "string" || !params.notebookId.trim())) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "BAD_REQUEST", "surface.createNotebook notebookId 不能为空")
+          );
+          return;
+        }
+
+        const paneId = params.paneId?.trim() || currentWorkspace.activePaneId;
+        const pane = currentWorkspace.panes[paneId];
+        if (!pane) {
+          window.wmux?.socket.respond(
+            createSocketErrorResponse(request.id, "NOT_FOUND", "找不到 pane", {
+              paneId
+            })
+          );
+          return;
+        }
+
+        const surface = createNotebookSurface({ name: params.name, notebookId: params.notebookId });
         setWorkspaces((items) =>
           items.map((workspace) =>
             workspace.id === currentWorkspace.id
@@ -4309,6 +4418,30 @@ export function App(): ReactElement {
     });
   };
 
+  const handleAddNotebookSurface = (paneId: string): void => {
+    updateActiveWorkspace((workspace) => {
+      const pane = workspace.panes[paneId];
+      const surface = createNotebookSurface();
+
+      return {
+        ...workspace,
+        activePaneId: paneId,
+        panes: {
+          ...workspace.panes,
+          [paneId]: {
+            ...pane,
+            surfaceIds: [...pane.surfaceIds, surface.id],
+            activeSurfaceId: surface.id
+          }
+        },
+        surfaces: {
+          ...workspace.surfaces,
+          [surface.id]: surface
+        }
+      };
+    });
+  };
+
   const handleOpenTerminalUrl = (url: string): void => {
     const normalizedUrl = normalizeBrowserUrl(url);
     const currentWorkspaces = workspacesRef.current;
@@ -4783,6 +4916,12 @@ export function App(): ReactElement {
         return;
       }
 
+      if (isPrimary && event.shiftKey && key === "m") {
+        event.preventDefault();
+        handleAddNotebookSurface(activeWorkspace.activePaneId);
+        return;
+      }
+
       if (isPrimary && event.altKey && key === "arrowdown") {
         event.preventDefault();
         handleSplitActivePane("vertical");
@@ -4863,6 +5002,7 @@ export function App(): ReactElement {
           onShellProfileChange={setShellProfile}
           onAddTerminal={() => handleAddTerminalSurface(activeWorkspace.activePaneId)}
           onAddBrowser={() => handleAddBrowserSurface(activeWorkspace.activePaneId)}
+          onAddNotebook={() => handleAddNotebookSurface(activeWorkspace.activePaneId)}
           onSplitHorizontal={() => handleSplitActivePane("horizontal")}
           onSplitVertical={() => handleSplitActivePane("vertical")}
           onOpenCommandPalette={openCommandPalette}
@@ -5128,8 +5268,10 @@ function CommandPalette({
                         <Settings size={16} />
                       ) : command.category === "block" ? (
                         <Activity size={16} />
-                      ) : command.category === "workflow" || command.icon === "workflow" ? (
-                        <ScrollText size={16} />
+                    ) : command.icon === "notebook" ? (
+                      <BookOpen size={16} />
+                    ) : command.category === "workflow" || command.icon === "workflow" ? (
+                      <ScrollText size={16} />
                       ) : command.icon === "workspace" ? (
                         <LayoutGrid size={16} />
                       ) : (
@@ -5807,6 +5949,7 @@ function TitleBar({
   onShellProfileChange,
   onAddTerminal,
   onAddBrowser,
+  onAddNotebook,
   onSplitHorizontal,
   onSplitVertical,
   onOpenCommandPalette
@@ -5818,6 +5961,7 @@ function TitleBar({
   onShellProfileChange: (profile: ShellProfile) => void;
   onAddTerminal: () => void;
   onAddBrowser: () => void;
+  onAddNotebook: () => void;
   onSplitHorizontal: () => void;
   onSplitVertical: () => void;
   onOpenCommandPalette: () => void;
@@ -5851,6 +5995,10 @@ function TitleBar({
         <button className="toolbarButton" type="button" aria-label="Browser" onClick={onAddBrowser}>
           <Globe size={15} />
           <span>Browser</span>
+        </button>
+        <button className="toolbarButton" type="button" aria-label="Notebook" onClick={onAddNotebook}>
+          <BookOpen size={15} />
+          <span>Notebook</span>
         </button>
         <label className="shellSelectLabel">
           <Terminal size={14} />
@@ -6181,7 +6329,7 @@ function SurfaceTabs({
   return (
     <div className="surfaceTabs">
       {surfaces.map((surface) => {
-        const Icon = surface.type === "browser" ? Globe : Terminal;
+        const Icon = surface.type === "browser" ? Globe : surface.type === "notebook" ? BookOpen : Terminal;
         return (
           <button
             className={`surfaceTab ${surface.id === activeSurfaceId ? "surfaceTabActive" : ""}`}
@@ -6259,6 +6407,18 @@ function SurfaceBody({
 }): ReactElement {
   if (surface.type === "browser") {
     return <BrowserSurface surface={surface} onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle} />;
+  }
+
+  if (surface.type === "notebook") {
+    return (
+      <NotebookSurface
+        surface={surface}
+        workspaceId={workspaceId}
+        cwd={cwd}
+        shell={shellProfile}
+        onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle}
+      />
+    );
   }
 
   return (
