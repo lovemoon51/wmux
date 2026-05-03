@@ -22,4 +22,23 @@ describe("notebookMarkdown", () => {
     expect(normalizeNotebookLanguage("pwsh")).toBe("powershell");
     expect(normalizeNotebookLanguage("shell-session")).toBe("shell");
   });
+
+  it("treats an unclosed fenced block as executable code", () => {
+    const blocks = parseNotebookBlocks("Intro\n\n```bash\nnpm test\nnpm run lint");
+
+    expect(blocks).toEqual([
+      {
+        type: "markdown",
+        id: "markdown-0",
+        text: "Intro\n\n"
+      },
+      {
+        type: "code",
+        id: "code-1",
+        index: 1,
+        language: "bash",
+        code: "npm test\nnpm run lint"
+      }
+    ]);
+  });
 });

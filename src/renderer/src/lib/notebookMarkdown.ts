@@ -14,7 +14,7 @@ export type NotebookCodeBlock = {
 
 export type NotebookBlock = NotebookTextBlock | NotebookCodeBlock;
 
-const fencedCodeBlockPattern = /^```([^\r\n`]*)\r?\n([\s\S]*?)(?:\r?\n```|$)/gm;
+const fencedCodeBlockPattern = /^```([^\r\n`]*)\r?\n([\s\S]*?)(?:\r?\n```(?=\r?\n|(?![\s\S]))|(?![\s\S]))/gm;
 
 export function parseNotebookBlocks(markdown: string): NotebookBlock[] {
   const blocks: NotebookBlock[] = [];
@@ -68,4 +68,3 @@ export function normalizeNotebookLanguage(language: string | undefined): string 
   }
   return normalized;
 }
-

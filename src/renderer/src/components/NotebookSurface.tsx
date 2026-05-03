@@ -16,6 +16,7 @@ import {
   type ReactElement
 } from "react";
 import type { NotebookBlock, NotebookCodeBlock } from "../lib/notebookMarkdown";
+import { buildNotebookExecutionInput } from "../lib/notebookExecution";
 import { extractNotebookCodeBlocks, parseNotebookBlocks } from "../lib/notebookMarkdown";
 import type { ShellProfile, Surface } from "@shared/types";
 
@@ -361,15 +362,4 @@ async function runNotebookCode({
     terminal.dispose({ id: sessionId });
     throw error;
   }
-}
-
-function buildNotebookExecutionInput(command: string, shell: ShellProfile): string {
-  const normalizedCommand = command.endsWith("\n") || command.endsWith("\r") ? command : `${command}\n`;
-  if (shell === "cmd") {
-    return `${normalizedCommand}exit /b %ERRORLEVEL%\r\n`;
-  }
-  if (shell === "bash" || shell === "zsh") {
-    return `${normalizedCommand}exit $?\n`;
-  }
-  return `${normalizedCommand}exit $LASTEXITCODE\r\n`;
 }
