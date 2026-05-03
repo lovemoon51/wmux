@@ -117,6 +117,7 @@ import {
 import { searchBlockHistory } from "./lib/blockHistorySearch";
 import { getWorkspaceUnreadCount } from "./lib/workspaceUnread";
 import { detectTerminalAttentionPrompt } from "./lib/terminalAttention";
+import { createNotebookSurface } from "./lib/notebookSurface";
 import {
   isWorkspaceStatus,
   statusClass,
@@ -296,26 +297,6 @@ function createBrowserSurface(options: { name?: string; url?: string } = {}): Su
     subtitle: url,
     status: "idle"
   };
-}
-
-function createNotebookSurface(options: { name?: string; notebookId?: string } = {}): Surface {
-  const number = nextSurfaceNumber++;
-  const notebookId = normalizeNotebookId(options.notebookId, number);
-  return {
-    id: `surface-notebook-${notebookId}`,
-    type: "notebook",
-    name: options.name?.trim() || `Notebook ${number}`,
-    subtitle: `.wmux/notebooks/${notebookId}.md`,
-    status: "idle",
-    notebookId
-  };
-}
-
-function normalizeNotebookId(value: string | undefined, number: number): string {
-  const fallback = `notebook-${Date.now()}-${number}`;
-  const raw = (value?.trim() || fallback).replace(/^surface-notebook-/, "");
-  const sanitized = raw.replace(/[^a-zA-Z0-9._-]/g, "-").slice(0, 128);
-  return /^[a-zA-Z0-9]/.test(sanitized) ? sanitized : fallback;
 }
 
 function createPaneWithTerminal(): { paneId: string; surface: Surface; pane: Workspace["panes"][string] } {
@@ -714,21 +695,21 @@ function getWorkspaceCommandIdentity(command: WmuxCommandConfig): { name: string
 
 function createConfiguredSurface(config: WmuxSurfaceConfig, fallbackName: string): Surface {
   const number = nextSurfaceNumber++;
-  const notebookId = config.type === "notebook" ? normalizeNotebookId(config.notebookId, number) : undefined;
+  if (config.type === "notebook") {
+    return createNotebookSurface({ number, name: config.name?.trim() || fallbackName, notebookId: config.notebookId });
+  }
+
   const fallbackSubtitle =
     config.type === "terminal"
       ? "PowerShell"
-      : config.type === "browser"
-        ? (config.url ?? "about:blank")
-        : `.wmux/notebooks/${notebookId}.md`;
+      : (config.url ?? "about:blank");
 
   return {
-    id: notebookId ? `surface-notebook-${notebookId}` : `surface-${config.type}-${Date.now()}-${number}`,
+    id: `surface-${config.type}-${Date.now()}-${number}`,
     type: config.type,
     name: config.name?.trim() || fallbackName,
     subtitle: fallbackSubtitle,
-    status: config.type === "terminal" && config.command ? "running" : "idle",
-    ...(notebookId ? { notebookId } : {})
+    status: config.type === "terminal" && config.command ? "running" : "idle"
   };
 }
 
@@ -3836,7 +3817,11 @@ export function App(): ReactElement {
           return;
         }
 
-        const surface = createNotebookSurface({ name: params.name, notebookId: params.notebookId });
+        const surface = createNotebookSurface({
+          number: nextSurfaceNumber++,
+          name: params.name,
+          notebookId: params.notebookId
+        });
         setWorkspaces((items) =>
           items.map((workspace) =>
             workspace.id === currentWorkspace.id
@@ -4421,7 +4406,7 @@ export function App(): ReactElement {
   const handleAddNotebookSurface = (paneId: string): void => {
     updateActiveWorkspace((workspace) => {
       const pane = workspace.panes[paneId];
-      const surface = createNotebookSurface();
+      const surface = createNotebookSurface({ number: nextSurfaceNumber++ });
 
       return {
         ...workspace,
