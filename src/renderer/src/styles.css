@@ -954,7 +954,6 @@ kbd {
   flex: none;
   width: 25px;
   height: 25px;
-  margin-left: auto;
   place-items: center;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
@@ -989,6 +988,7 @@ kbd {
   padding: 0 10px;
   color: var(--text-muted);
   font-size: 11px;
+  min-width: 0;
 }
 
 .terminalPrompt,
@@ -999,7 +999,14 @@ kbd {
 }
 
 .terminalPrompt {
+  flex: none;
   min-width: 0;
+  max-width: 28%;
+}
+
+.terminalState {
+  flex: none;
+  margin-left: auto;
 }
 
 .terminalPromptText {
@@ -1010,8 +1017,55 @@ kbd {
 
 .terminalFontControls {
   display: inline-flex;
+  flex: none;
   gap: 2px;
   margin-left: 4px;
+}
+
+.terminalStatusBar {
+  display: inline-flex;
+  align-items: center;
+  flex: 1 1 180px;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.surfaceTabsSpacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.terminalStatusPill {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 4px;
+  max-width: 180px;
+  min-width: 0;
+  border: 1px solid #303844;
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: var(--text-secondary);
+  background: #151a20;
+  line-height: 1;
+}
+
+.terminalStatusPath {
+  flex: 1 1 120px;
+  max-width: 280px;
+}
+
+.terminalStatusDirty {
+  color: var(--attention);
+  border-color: rgba(226, 184, 77, 0.5);
+}
+
+.terminalStatusText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .terminalFontControls .iconButton {

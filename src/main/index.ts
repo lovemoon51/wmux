@@ -31,6 +31,7 @@ import {
   registerSocketRpcServer,
   type SocketRpcServer
 } from "./socket/rpcServer";
+import { inspectWorkspaceRuntime } from "./workspaceRuntime";
 import type {
   BrowserRpcMethod,
   AiCancelRequest,
@@ -458,13 +459,21 @@ function parseProjectConfig(
 
 async function inspectWorkspaceCwd(cwd: string): Promise<WorkspaceInspection> {
   const resolvedCwd = resolve(cwd);
-  const [branch, ports] = await Promise.all([detectGitBranch(resolvedCwd), detectListeningPorts(resolvedCwd)]);
+  const [branch, gitDirty, ports, runtime] = await Promise.all([
+    detectGitBranch(resolvedCwd),
+    detectGitDirty(resolvedCwd),
+    detectListeningPorts(resolvedCwd),
+    inspectWorkspaceRuntime(resolvedCwd)
+  ]);
   const pullRequest = await detectPullRequest(resolvedCwd, branch);
   return {
     cwd: resolvedCwd.replace(/\\/g, "/"),
     branch,
+    gitDirty,
     ports,
-    pullRequest
+    pullRequest,
+    venv: runtime.venv,
+    nodeVersion: runtime.nodeVersion
   };
 }
 
@@ -484,6 +493,18 @@ async function detectGitBranch(cwd: string): Promise<string | undefined> {
       windowsHide: true
     });
     return head.stdout.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function detectGitDirty(cwd: string): Promise<boolean | undefined> {
+  try {
+    const { stdout } = await execFileAsync("git", ["-C", cwd, "status", "--porcelain"], {
+      timeout: 2500,
+      windowsHide: true
+    });
+    return stdout.trim().length > 0;
   } catch {
     return undefined;
   }

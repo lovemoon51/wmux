@@ -271,8 +271,11 @@ export type WmuxProjectConfigResult = {
 export type WorkspaceInspection = {
   cwd: string;
   branch?: string;
+  gitDirty?: boolean;
   ports: number[];
   pullRequest?: PullRequestSummary;
+  venv?: string;
+  nodeVersion?: string;
 };
 
 // PR 状态：open/draft/merged/closed —— 来源 gh CLI，缺失时 undefined
@@ -694,11 +697,14 @@ export type Workspace = {
   name: string;
   cwd: string;
   branch?: string;
+  gitDirty?: boolean;
   ports: number[];
   status: WorkspaceStatus;
   notice?: string;
   recentEvents?: WorkspaceStatusEvent[];
   pullRequest?: PullRequestSummary;
+  venv?: string;
+  nodeVersion?: string;
   // ISO 时间戳：用户最近一次将该 workspace 切为 active 的时刻
   // unread 计数 = recentEvents 中 at > lastViewedAt 的条目数
   lastViewedAt?: string;

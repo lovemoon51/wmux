@@ -122,6 +122,7 @@ import {
   withWorkspaceStatusEvent
 } from "./lib/workspaceStatusEvents";
 import { TerminalSurface, setTerminalSearchHandlers, writeTerminalInputDraft } from "./components/TerminalSurface";
+import { TerminalStatusBar, type TerminalStatusBarProps } from "./components/StatusBar";
 import {
   createWorkflowArgDefaults,
   getWorkflowCommandTemplate,
@@ -2032,9 +2033,24 @@ function shouldApplyWorkspaceInspection(workspace: Workspace, inspection: Worksp
   const nextPullRequestKey = serializePullRequestForCompare(inspection.pullRequest);
   return (
     workspace.branch !== nextBranch ||
+    workspace.gitDirty !== inspection.gitDirty ||
     workspace.ports.join(",") !== nextPorts.join(",") ||
-    currentPullRequestKey !== nextPullRequestKey
+    currentPullRequestKey !== nextPullRequestKey ||
+    workspace.venv !== inspection.venv ||
+    workspace.nodeVersion !== inspection.nodeVersion
   );
+}
+
+function mergeWorkspaceInspection(workspace: Workspace, inspection: WorkspaceInspection): Workspace {
+  return {
+    ...workspace,
+    branch: inspection.branch,
+    gitDirty: inspection.gitDirty,
+    ports: inspection.ports,
+    pullRequest: inspection.pullRequest,
+    venv: inspection.venv,
+    nodeVersion: inspection.nodeVersion
+  };
 }
 
 function serializePullRequestForCompare(value: PullRequestSummary | undefined): string {
@@ -2350,12 +2366,7 @@ export function App(): ReactElement {
             return workspace;
           }
 
-          return {
-            ...workspace,
-            branch: inspection.branch,
-            ports: inspection.ports,
-            pullRequest: inspection.pullRequest
-          };
+          return mergeWorkspaceInspection(workspace, inspection);
         })
       );
     });
@@ -2399,12 +2410,7 @@ export function App(): ReactElement {
             if (!inspection || !shouldApplyWorkspaceInspection(workspace, inspection)) {
               return workspace;
             }
-            return {
-              ...workspace,
-              branch: inspection.branch,
-              ports: inspection.ports,
-              pullRequest: inspection.pullRequest
-            };
+            return mergeWorkspaceInspection(workspace, inspection);
           })
         );
       });
@@ -6014,6 +6020,17 @@ function PaneView({
         surfaces={surfaces}
         activeSurfaceId={activeSurface.id}
         canClose={surfaces.length > 1}
+        statusInfo={
+          activeSurface.type === "terminal"
+            ? {
+                cwd: workspace.cwd,
+                branch: workspace.branch,
+                gitDirty: workspace.gitDirty,
+                venv: workspace.venv,
+                nodeVersion: workspace.nodeVersion
+              }
+            : null
+        }
         onAdd={() => onAddTerminalSurface(paneId)}
         onSelect={(surfaceId) => {
           onActivatePane(paneId);
@@ -6056,6 +6073,7 @@ function SurfaceTabs({
   surfaces,
   activeSurfaceId,
   canClose,
+  statusInfo,
   onAdd,
   onSelect,
   onClose,
@@ -6065,6 +6083,7 @@ function SurfaceTabs({
   surfaces: Surface[];
   activeSurfaceId: string;
   canClose: boolean;
+  statusInfo?: TerminalStatusBarProps | null;
   onAdd: () => void;
   onSelect: (surfaceId: string) => void;
   onClose: (surfaceId: string) => void;
@@ -6114,6 +6133,7 @@ function SurfaceTabs({
           </button>
         );
       })}
+      {statusInfo ? <TerminalStatusBar {...statusInfo} /> : <span className="surfaceTabsSpacer" aria-hidden="true" />}
       <button className="surfaceAdd" type="button" aria-label="Add terminal surface" onClick={onAdd}>
         <Plus size={14} />
       </button>
