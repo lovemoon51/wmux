@@ -35,6 +35,7 @@ type NotebookSurfaceProps = {
   cwd: string;
   shell: ShellProfile;
   onUpdateSurfaceSubtitle: (surfaceId: string, subtitle: string) => void;
+  onUpdateSurfaceStatus: (surfaceId: string, status: Surface["status"], subtitle?: string) => void;
 };
 
 export function NotebookSurface({
@@ -42,7 +43,8 @@ export function NotebookSurface({
   workspaceId,
   cwd,
   shell,
-  onUpdateSurfaceSubtitle
+  onUpdateSurfaceSubtitle,
+  onUpdateSurfaceStatus
 }: NotebookSurfaceProps): ReactElement {
   const notebookId = surface.notebookId ?? surface.id.replace(/^surface-notebook-/, "");
   const [content, setContent] = useState("");
@@ -80,6 +82,7 @@ export function NotebookSurface({
         setDirty(!result.exists);
         setStatusText(result.exists ? "Saved" : "Draft");
         onUpdateSurfaceSubtitle(surface.id, result.relativePath);
+        onUpdateSurfaceStatus(surface.id, result.exists ? "success" : "attention", result.relativePath);
       })
       .catch((reason) => {
         if (cancelled) {
@@ -87,12 +90,13 @@ export function NotebookSurface({
         }
         setError(reason instanceof Error ? reason.message : String(reason));
         setStatusText("Load failed");
+        onUpdateSurfaceStatus(surface.id, "error");
       });
 
     return () => {
       cancelled = true;
     };
-  }, [cwd, loadKey, notebookId, onUpdateSurfaceSubtitle, surface.id, surface.name]);
+  }, [cwd, loadKey, notebookId, onUpdateSurfaceStatus, onUpdateSurfaceSubtitle, surface.id, surface.name]);
 
   const saveNotebook = useCallback(async (): Promise<void> => {
     setStatusText("Saving");
@@ -102,19 +106,22 @@ export function NotebookSurface({
       if (result) {
         setPathLabel(result.relativePath);
         onUpdateSurfaceSubtitle(surface.id, result.relativePath);
+        onUpdateSurfaceStatus(surface.id, "success", result.relativePath);
       }
       setDirty(false);
       setStatusText("Saved");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
       setStatusText("Save failed");
+      onUpdateSurfaceStatus(surface.id, "error");
     }
-  }, [cwd, notebookId, onUpdateSurfaceSubtitle, surface.id]);
+  }, [cwd, notebookId, onUpdateSurfaceStatus, onUpdateSurfaceSubtitle, surface.id]);
 
   const handleChange = (event: ChangeEvent<HTMLTextAreaElement>): void => {
     setContent(event.target.value);
     setDirty(true);
     setStatusText("Draft");
+    onUpdateSurfaceStatus(surface.id, "attention");
   };
 
   const handleEditorKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -143,6 +150,7 @@ export function NotebookSurface({
         },
         ...items.filter((item) => item.blockIndex !== block.index)
       ]);
+      onUpdateSurfaceStatus(surface.id, "running");
 
       try {
         await runNotebookCode({
@@ -163,6 +171,7 @@ export function NotebookSurface({
                 item.id === runId ? { ...item, status: exitCode === 0 ? "success" : "error", exitCode } : item
               )
             );
+            onUpdateSurfaceStatus(surface.id, exitCode === 0 ? "success" : "error");
           }
         });
       } catch (reason) {
@@ -170,9 +179,10 @@ export function NotebookSurface({
         setRunResults((items) =>
           items.map((item) => (item.id === runId ? { ...item, status: "error", output: message, exitCode: -1 } : item))
         );
+        onUpdateSurfaceStatus(surface.id, "error");
       }
     },
-    [cwd, shell, surface.id, workspaceId]
+    [cwd, onUpdateSurfaceStatus, shell, surface.id, workspaceId]
   );
 
   const runAll = (): void => {

@@ -964,10 +964,11 @@ kbd {
   min-width: 0;
   align-items: center;
   gap: 3px;
-  overflow: hidden;
+  overflow: auto hidden;
   border-bottom: 1px solid var(--border-subtle);
   background: #14181e;
   padding: 3px;
+  scrollbar-width: thin;
 }
 
 .surfaceTab {
@@ -1035,6 +1036,10 @@ kbd {
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-secondary);
+}
+
+.surfaceAddNotebook {
+  color: var(--accent);
 }
 
 .paneCloseButton {

@@ -85,6 +85,7 @@ import type {
   PaletteCommand,
   PaletteOpenParams,
   PaletteRunParams,
+  Pane,
   StatusListParams,
   StatusSetParams,
   Surface,
@@ -2102,6 +2103,25 @@ function shouldIgnoreGlobalShortcut(event: KeyboardEvent): boolean {
   return false;
 }
 
+function attachSurfaceToPane(workspace: Workspace, paneId: string, pane: Pane, surface: Surface): Workspace {
+  return {
+    ...workspace,
+    activePaneId: paneId,
+    panes: {
+      ...workspace.panes,
+      [paneId]: {
+        ...pane,
+        surfaceIds: [...pane.surfaceIds, surface.id],
+        activeSurfaceId: surface.id
+      }
+    },
+    surfaces: {
+      ...workspace.surfaces,
+      [surface.id]: surface
+    }
+  };
+}
+
 function isEditableTextTarget(target: EventTarget | null): target is HTMLInputElement | HTMLTextAreaElement {
   return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
 }
@@ -3295,7 +3315,7 @@ export function App(): ReactElement {
             category: "surface",
             title: "New notebook surface",
             subtitle: "Create a Markdown notebook in .wmux/notebooks",
-            shortcut: "Ctrl+Shift+M",
+            shortcut: "Ctrl+Shift+O",
             icon: "notebook",
             run: () => handleAddNotebookSurface(activeWorkspace.activePaneId)
           },
@@ -4366,22 +4386,7 @@ export function App(): ReactElement {
       const pane = workspace.panes[paneId];
       const surface = createTerminalSurface();
 
-      return {
-        ...workspace,
-        activePaneId: paneId,
-        panes: {
-          ...workspace.panes,
-          [paneId]: {
-            ...pane,
-            surfaceIds: [...pane.surfaceIds, surface.id],
-            activeSurfaceId: surface.id
-          }
-        },
-        surfaces: {
-          ...workspace.surfaces,
-          [surface.id]: surface
-        }
-      };
+      return attachSurfaceToPane(workspace, paneId, pane, surface);
     });
   };
 
@@ -4390,22 +4395,7 @@ export function App(): ReactElement {
       const pane = workspace.panes[paneId];
       const surface = createBrowserSurface();
 
-      return {
-        ...workspace,
-        activePaneId: paneId,
-        panes: {
-          ...workspace.panes,
-          [paneId]: {
-            ...pane,
-            surfaceIds: [...pane.surfaceIds, surface.id],
-            activeSurfaceId: surface.id
-          }
-        },
-        surfaces: {
-          ...workspace.surfaces,
-          [surface.id]: surface
-        }
-      };
+      return attachSurfaceToPane(workspace, paneId, pane, surface);
     });
   };
 
@@ -4414,22 +4404,7 @@ export function App(): ReactElement {
       const pane = workspace.panes[paneId];
       const surface = createNotebookSurface({ number: nextSurfaceNumber++ });
 
-      return {
-        ...workspace,
-        activePaneId: paneId,
-        panes: {
-          ...workspace.panes,
-          [paneId]: {
-            ...pane,
-            surfaceIds: [...pane.surfaceIds, surface.id],
-            activeSurfaceId: surface.id
-          }
-        },
-        surfaces: {
-          ...workspace.surfaces,
-          [surface.id]: surface
-        }
-      };
+      return attachSurfaceToPane(workspace, paneId, pane, surface);
     });
   };
 
@@ -4537,6 +4512,32 @@ export function App(): ReactElement {
             [surfaceId]: {
               ...surface,
               subtitle
+            }
+          }
+        };
+      })
+    );
+  };
+
+  const handleUpdateSurfaceStatus = (surfaceId: string, status: WorkspaceStatus, subtitle?: string): void => {
+    setWorkspaces((currentWorkspaces) =>
+      currentWorkspaces.map((workspace) => {
+        const surface = workspace.surfaces[surfaceId];
+        if (!surface) {
+          return workspace;
+        }
+        if (surface.status === status && (subtitle === undefined || surface.subtitle === subtitle)) {
+          return workspace;
+        }
+
+        return {
+          ...workspace,
+          surfaces: {
+            ...workspace.surfaces,
+            [surfaceId]: {
+              ...surface,
+              status,
+              subtitle: subtitle ?? surface.subtitle
             }
           }
         };
@@ -4836,6 +4837,7 @@ export function App(): ReactElement {
       const key = event.key.toLowerCase();
       const isPrimary = event.ctrlKey || event.metaKey;
       const isPlain = !event.ctrlKey && !event.metaKey && !event.altKey;
+      const targetElement = event.target instanceof HTMLElement ? event.target : null;
 
       if (isPrimary && (key === "k" || key === "p")) {
         event.preventDefault();
@@ -4873,6 +4875,18 @@ export function App(): ReactElement {
         }
       }
 
+      if (
+        isPrimary &&
+        !event.altKey &&
+        !event.shiftKey &&
+        key === "w" &&
+        !targetElement?.closest(".terminalHost")
+      ) {
+        event.preventDefault();
+        handleCloseActiveSurface();
+        return;
+      }
+
       if (shouldIgnoreGlobalShortcut(event)) {
         return;
       }
@@ -4907,7 +4921,7 @@ export function App(): ReactElement {
         return;
       }
 
-      if (isPrimary && event.shiftKey && key === "m") {
+      if (isPrimary && event.shiftKey && (key === "m" || key === "o")) {
         event.preventDefault();
         handleAddNotebookSurface(activeWorkspace.activePaneId);
         return;
@@ -4931,10 +4945,6 @@ export function App(): ReactElement {
         return;
       }
 
-      if (isPrimary && key === "w") {
-        event.preventDefault();
-        handleCloseActiveSurface();
-      }
     };
 
     window.addEventListener("keydown", handleGlobalKeyDown);
@@ -5006,6 +5016,7 @@ export function App(): ReactElement {
             node={activeWorkspace.layout}
             shellProfile={shellProfile}
             onAddTerminalSurface={handleAddTerminalSurface}
+            onAddNotebookSurface={handleAddNotebookSurface}
             onSelectSurface={handleSelectSurface}
             onCloseSurface={handleCloseSurface}
             onActivatePane={(paneId) =>
@@ -5017,6 +5028,7 @@ export function App(): ReactElement {
             onClosePane={handleClosePane}
             onDropSurfaceToPane={handleDropSurfaceToPane}
             onUpdateSurfaceSubtitle={handleUpdateSurfaceSubtitle}
+            onUpdateSurfaceStatus={handleUpdateSurfaceStatus}
             onOpenTerminalUrl={handleOpenTerminalUrl}
             onTerminalOutput={handleTerminalOutput}
             aiSettings={aiSettings}
@@ -5989,7 +6001,7 @@ function TitleBar({
           <Globe size={15} />
           <span>Browser</span>
         </button>
-        <button className="toolbarButton" type="button" aria-label="Notebook" onClick={onAddNotebook}>
+        <button className="toolbarButton" type="button" aria-label="Notebook" title="New notebook surface" onClick={onAddNotebook}>
           <BookOpen size={15} />
           <span>Notebook</span>
         </button>
@@ -6018,6 +6030,7 @@ function LayoutRenderer({
   node,
   shellProfile,
   onAddTerminalSurface,
+  onAddNotebookSurface,
   onSelectSurface,
   onCloseSurface,
   onActivatePane,
@@ -6025,6 +6038,7 @@ function LayoutRenderer({
   onClosePane,
   onDropSurfaceToPane,
   onUpdateSurfaceSubtitle,
+  onUpdateSurfaceStatus,
   onOpenTerminalUrl,
   onTerminalOutput,
   aiSettings,
@@ -6036,6 +6050,7 @@ function LayoutRenderer({
   node: LayoutNode;
   shellProfile: ShellProfile;
   onAddTerminalSurface: (paneId: string) => void;
+  onAddNotebookSurface: (paneId: string) => void;
   onSelectSurface: (paneId: string, surfaceId: string) => void;
   onCloseSurface: (paneId: string, surfaceId: string) => void;
   onActivatePane: (paneId: string) => void;
@@ -6043,6 +6058,7 @@ function LayoutRenderer({
   onClosePane: (paneId: string) => void;
   onDropSurfaceToPane: (targetPaneId: string, edge: SplitDropEdge, payload: DraggedSurfacePayload) => void;
   onUpdateSurfaceSubtitle: (surfaceId: string, subtitle: string) => void;
+  onUpdateSurfaceStatus: (surfaceId: string, status: WorkspaceStatus, subtitle?: string) => void;
   onOpenTerminalUrl: (url: string) => void;
   onTerminalOutput: (surfaceId: string, output: string) => void;
   aiSettings: AiSettings;
@@ -6057,12 +6073,14 @@ function LayoutRenderer({
         paneId={node.id}
         shellProfile={shellProfile}
         onAddTerminalSurface={onAddTerminalSurface}
+        onAddNotebookSurface={onAddNotebookSurface}
         onSelectSurface={onSelectSurface}
         onCloseSurface={onCloseSurface}
         onActivatePane={onActivatePane}
         onClosePane={onClosePane}
         onDropSurfaceToPane={onDropSurfaceToPane}
         onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle}
+        onUpdateSurfaceStatus={onUpdateSurfaceStatus}
         onOpenTerminalUrl={onOpenTerminalUrl}
         onTerminalOutput={onTerminalOutput}
         aiSettings={aiSettings}
@@ -6087,6 +6105,7 @@ function LayoutRenderer({
         node={node.children[0]}
         shellProfile={shellProfile}
         onAddTerminalSurface={onAddTerminalSurface}
+        onAddNotebookSurface={onAddNotebookSurface}
         onSelectSurface={onSelectSurface}
         onCloseSurface={onCloseSurface}
         onActivatePane={onActivatePane}
@@ -6094,6 +6113,7 @@ function LayoutRenderer({
         onClosePane={onClosePane}
         onDropSurfaceToPane={onDropSurfaceToPane}
         onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle}
+        onUpdateSurfaceStatus={onUpdateSurfaceStatus}
         onOpenTerminalUrl={onOpenTerminalUrl}
         onTerminalOutput={onTerminalOutput}
         aiSettings={aiSettings}
@@ -6107,6 +6127,7 @@ function LayoutRenderer({
         node={node.children[1]}
         shellProfile={shellProfile}
         onAddTerminalSurface={onAddTerminalSurface}
+        onAddNotebookSurface={onAddNotebookSurface}
         onSelectSurface={onSelectSurface}
         onCloseSurface={onCloseSurface}
         onActivatePane={onActivatePane}
@@ -6114,6 +6135,7 @@ function LayoutRenderer({
         onClosePane={onClosePane}
         onDropSurfaceToPane={onDropSurfaceToPane}
         onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle}
+        onUpdateSurfaceStatus={onUpdateSurfaceStatus}
         onOpenTerminalUrl={onOpenTerminalUrl}
         onTerminalOutput={onTerminalOutput}
         aiSettings={aiSettings}
@@ -6176,12 +6198,14 @@ function PaneView({
   paneId,
   shellProfile,
   onAddTerminalSurface,
+  onAddNotebookSurface,
   onSelectSurface,
   onCloseSurface,
   onActivatePane,
   onClosePane,
   onDropSurfaceToPane,
   onUpdateSurfaceSubtitle,
+  onUpdateSurfaceStatus,
   onOpenTerminalUrl,
   onTerminalOutput,
   aiSettings,
@@ -6193,12 +6217,14 @@ function PaneView({
   paneId: string;
   shellProfile: ShellProfile;
   onAddTerminalSurface: (paneId: string) => void;
+  onAddNotebookSurface: (paneId: string) => void;
   onSelectSurface: (paneId: string, surfaceId: string) => void;
   onCloseSurface: (paneId: string, surfaceId: string) => void;
   onActivatePane: (paneId: string) => void;
   onClosePane: (paneId: string) => void;
   onDropSurfaceToPane: (targetPaneId: string, edge: SplitDropEdge, payload: DraggedSurfacePayload) => void;
   onUpdateSurfaceSubtitle: (surfaceId: string, subtitle: string) => void;
+  onUpdateSurfaceStatus: (surfaceId: string, status: WorkspaceStatus, subtitle?: string) => void;
   onOpenTerminalUrl: (url: string) => void;
   onTerminalOutput: (surfaceId: string, output: string) => void;
   aiSettings: AiSettings;
@@ -6259,7 +6285,8 @@ function PaneView({
               }
             : null
         }
-        onAdd={() => onAddTerminalSurface(paneId)}
+        onAddTerminal={() => onAddTerminalSurface(paneId)}
+        onAddNotebook={() => onAddNotebookSurface(paneId)}
         onSelect={(surfaceId) => {
           onActivatePane(paneId);
           onSelectSurface(paneId, surfaceId);
@@ -6284,6 +6311,7 @@ function PaneView({
               cwd={workspace.cwd}
               shellProfile={shellProfile}
               onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle}
+              onUpdateSurfaceStatus={onUpdateSurfaceStatus}
               onOpenTerminalUrl={onOpenTerminalUrl}
               onTerminalOutput={onTerminalOutput}
               aiSettings={aiSettings}
@@ -6303,7 +6331,8 @@ function SurfaceTabs({
   activeSurfaceId,
   canClose,
   statusInfo,
-  onAdd,
+  onAddTerminal,
+  onAddNotebook,
   onSelect,
   onClose,
   onClosePane,
@@ -6313,7 +6342,8 @@ function SurfaceTabs({
   activeSurfaceId: string;
   canClose: boolean;
   statusInfo?: TerminalStatusBarProps | null;
-  onAdd: () => void;
+  onAddTerminal: () => void;
+  onAddNotebook: () => void;
   onSelect: (surfaceId: string) => void;
   onClose: (surfaceId: string) => void;
   onClosePane: () => void;
@@ -6363,8 +6393,11 @@ function SurfaceTabs({
         );
       })}
       {statusInfo ? <TerminalStatusBar {...statusInfo} /> : <span className="surfaceTabsSpacer" aria-hidden="true" />}
-      <button className="surfaceAdd" type="button" aria-label="Add terminal surface" onClick={onAdd}>
+      <button className="surfaceAdd" type="button" aria-label="Add terminal surface" onClick={onAddTerminal}>
         <Plus size={14} />
+      </button>
+      <button className="surfaceAdd surfaceAddNotebook" type="button" aria-label="Add notebook surface" onClick={onAddNotebook}>
+        <BookOpen size={14} />
       </button>
       <button className="paneCloseButton" type="button" aria-label="Close pane" title="Close pane" onClick={onClosePane}>
         <X size={14} />
@@ -6379,6 +6412,7 @@ function SurfaceBody({
   cwd,
   shellProfile,
   onUpdateSurfaceSubtitle,
+  onUpdateSurfaceStatus,
   onOpenTerminalUrl,
   onTerminalOutput,
   aiSettings,
@@ -6391,6 +6425,7 @@ function SurfaceBody({
   cwd: string;
   shellProfile: ShellProfile;
   onUpdateSurfaceSubtitle: (surfaceId: string, subtitle: string) => void;
+  onUpdateSurfaceStatus: (surfaceId: string, status: WorkspaceStatus, subtitle?: string) => void;
   onOpenTerminalUrl: (url: string) => void;
   onTerminalOutput: (surfaceId: string, output: string) => void;
   aiSettings: AiSettings;
@@ -6410,6 +6445,7 @@ function SurfaceBody({
         cwd={cwd}
         shell={shellProfile}
         onUpdateSurfaceSubtitle={onUpdateSurfaceSubtitle}
+        onUpdateSurfaceStatus={onUpdateSurfaceStatus}
       />
     );
   }

@@ -633,7 +633,7 @@ async function runEightTerminalSurfaceLatencySmoke(window) {
   let tabCount = await window.locator(".paneActive button.surfaceTab").count();
   while (tabCount < 8) {
     const startedAt = Date.now();
-    await window.locator(".paneActive .surfaceAdd").click();
+    await window.locator(".paneActive").getByLabel("Add terminal surface").click();
     await window.waitForFunction((count) => document.querySelectorAll(".paneActive button.surfaceTab").length === count + 1, tabCount, {
       timeout: 15_000
     });
@@ -950,6 +950,32 @@ async function runCliSocketSmoke(window) {
   }
   await runCliCommand(["surface", "focus", "--surface", "surface-agent"]);
   log("ok wmux new-browser");
+
+  await window.locator('button.surfaceTab[aria-label="Codex Agent"]').click();
+  const tabCountBeforeNotebookShortcut = await window.locator(".paneActive button.surfaceTab").count();
+  await window.locator(".titleIdentity h1").click();
+  await window.locator(".titleBar").getByRole("button", { name: "Notebook", exact: true }).click();
+  await window.waitForFunction(
+    (count) => document.querySelectorAll(".paneActive button.surfaceTab").length === count + 1,
+    tabCountBeforeNotebookShortcut,
+    { timeout: 15_000 }
+  );
+  await window.locator(".paneActive .surfaceBodyFrameActive .notebookEditor").waitFor({ timeout: 15_000 });
+  const appWindowCountBeforeNotebookClose = await app.windows().length;
+  await window.locator(".paneActive .surfaceBodyFrameActive .notebookEditor").fill("# Notebook close smoke\n");
+  await window.keyboard.press("Control+W");
+  await window.waitForFunction(
+    (count) => document.querySelectorAll(".paneActive button.surfaceTab").length === count,
+    tabCountBeforeNotebookShortcut,
+    { timeout: 15_000 }
+  );
+  const appWindowCountAfterNotebookClose = await app.windows().length;
+  if (appWindowCountAfterNotebookClose !== appWindowCountBeforeNotebookClose) {
+    throw new Error(
+      `Ctrl+W from notebook editor closed the app window: before=${appWindowCountBeforeNotebookClose} after=${appWindowCountAfterNotebookClose}`
+    );
+  }
+  log("ok notebook surface shortcut close");
 
   const createNotebookOutput = await runCliCommand([
     "new-notebook",
@@ -1764,7 +1790,7 @@ try {
   log("add terminal surface");
   const activePaneTabs = window.locator(".paneActive button.surfaceTab");
   const tabCountBeforeAdd = await activePaneTabs.count();
-  await window.locator(".paneActive .surfaceAdd").click();
+  await window.locator(".paneActive").getByLabel("Add terminal surface").click();
   await window.waitForFunction((count) => document.querySelectorAll(".paneActive button.surfaceTab").length === count + 1, tabCountBeforeAdd, {
     timeout: 15_000
   });
