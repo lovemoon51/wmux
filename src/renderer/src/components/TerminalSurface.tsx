@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState, type ReactElement } from "rea
 import type { AiSettings, Block, BlockEvent, ShellProfile, Surface, TerminalInputModeEvent, WorkspaceStatus } from "@shared/types";
 import { BlockOverlay } from "./BlockOverlay";
 import { InputEditor } from "./InputEditor";
+import { builtInThemes, type TerminalTheme } from "../lib/themes";
 import {
   createModernInputState,
   reduceModernInputState,
@@ -74,6 +75,7 @@ export function TerminalSurface({
   workspaceId,
   cwd,
   shell,
+  terminalTheme,
   onOpenUrl,
   onOutput,
   aiSettings,
@@ -84,6 +86,7 @@ export function TerminalSurface({
   workspaceId: string;
   cwd: string;
   shell: ShellProfile;
+  terminalTheme?: TerminalTheme;
   onOpenUrl?: (url: string) => void;
   onOutput?: (surfaceId: string, output: string) => void;
   aiSettings?: AiSettings | null;
@@ -104,6 +107,8 @@ export function TerminalSurface({
   const [modernInputState, setModernInputState] = useState<ModernInputState>(() => createModernInputState());
   const [inputDraft, setInputDraft] = useState("");
   const [inputFocusToken, setInputFocusToken] = useState(0);
+  const activeTerminalTheme = terminalTheme ?? builtInThemes[0].terminal;
+  const terminalThemeRef = useRef(activeTerminalTheme);
   const blocksRef = useRef<Block[]>([]);
   const focusedBlockIdRef = useRef<string | undefined>(undefined);
   const modernInputStateRef = useRef(modernInputState);
@@ -133,6 +138,10 @@ export function TerminalSurface({
   useEffect(() => {
     inputDraftRef.current = inputDraft;
   }, [inputDraft]);
+
+  useEffect(() => {
+    terminalThemeRef.current = activeTerminalTheme;
+  }, [activeTerminalTheme]);
 
   const focusBlock = useCallback((blockId: string): void => {
     setFocusedBlockId(blockId);
@@ -248,30 +257,7 @@ export function TerminalSurface({
       fontFamily: terminalFontStack,
       fontSize,
       lineHeight: 1.32,
-      theme: {
-        background: "#101214",
-        foreground: "#d7dee7",
-        cursor: "#3daee9",
-        cursorAccent: "#101214",
-        selectionBackground: "#314253",
-        selectionForeground: "#eceff3",
-        black: "#101214",
-        red: "#ef6b73",
-        green: "#58c27d",
-        yellow: "#e2b84d",
-        blue: "#3daee9",
-        magenta: "#c792ea",
-        cyan: "#53c7d4",
-        white: "#eceff3",
-        brightBlack: "#707987",
-        brightRed: "#ff858c",
-        brightGreen: "#72d99a",
-        brightYellow: "#f0ca62",
-        brightBlue: "#65c5f2",
-        brightMagenta: "#d7a6f4",
-        brightCyan: "#74dce7",
-        brightWhite: "#ffffff"
-      }
+      theme: terminalThemeRef.current
     });
     const fitAddon = new FitAddon();
 
@@ -672,6 +658,13 @@ export function TerminalSurface({
       fitAddonRef.current = null;
     };
   }, [copyBlock, cwd, focusBlockByOffset, focusInput, fontSize, rerunBlock, sessionId, shell, surface.id, workspaceId]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (terminal) {
+      terminal.options.theme = activeTerminalTheme;
+    }
+  }, [activeTerminalTheme]);
 
   useEffect(() => {
     setBlocks([]);

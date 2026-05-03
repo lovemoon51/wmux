@@ -134,6 +134,20 @@ import { ArgsPromptDialog } from "./components/ArgsPromptDialog";
 import { HistorySearch } from "./components/HistorySearch";
 import { AiExplainPanel } from "./components/AiExplainPanel";
 import { AiSettingsForm } from "./components/AiSettings";
+import { ThemePicker } from "./components/ThemePicker";
+import {
+  applyThemeToDocument,
+  builtInThemes,
+  defaultThemeId,
+  getThemeById,
+  importThemesFromJson,
+  mergeCustomThemes,
+  normalizePersistedCustomThemes,
+  serializeCustomThemes,
+  type TerminalTheme,
+  type ThemeImportResult,
+  type WmuxTheme
+} from "./lib/themes";
 
 let nextSurfaceNumber = 1;
 let nextWorkspaceNumber = 1;
@@ -2136,6 +2150,8 @@ export function App(): ReactElement {
   const [securityModeDraft, setSecurityModeDraft] = useState<SocketSecurityMode>("wmuxOnly");
   const [aiSettings, setAiSettings] = useState<AiSettings>(defaultAiSettings);
   const [aiSettingsDraft, setAiSettingsDraft] = useState<AiSettings>(defaultAiSettings);
+  const [themeId, setThemeId] = useState(defaultThemeId);
+  const [customThemes, setCustomThemes] = useState<WmuxTheme[]>([]);
   const [aiExplainState, setAiExplainState] = useState<AiExplainState | null>(null);
   const [aiSuggestionState, setAiSuggestionState] = useState<AiSuggestionState | null>(null);
   // FindBar 状态：当前活动 workspace 的活动 surface 内搜索
@@ -2192,6 +2208,13 @@ export function App(): ReactElement {
       .then((settings) => {
         setAiSettings(settings);
         setAiSettingsDraft({ ...settings, apiKey: "" });
+      })
+      .catch(() => undefined);
+    void window.wmux?.theme
+      ?.getSettings()
+      .then((settings) => {
+        setThemeId(settings.themeId);
+        setCustomThemes(normalizePersistedCustomThemes(settings.customThemes));
       })
       .catch(() => undefined);
     void window.wmux?.terminal
@@ -2288,6 +2311,8 @@ export function App(): ReactElement {
 
   const projectCommands = projectConfig?.config.commands ?? [];
   const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
+  const availableThemes = [...builtInThemes, ...customThemes];
+  const activeTheme = getThemeById(availableThemes, themeId);
   const workspacesRef = useRef(workspaces);
   const activeWorkspaceIdRef = useRef(activeWorkspaceId);
   const editingWorkspaceIdRef = useRef(editingWorkspaceId);
@@ -2328,6 +2353,10 @@ export function App(): ReactElement {
   useEffect(() => {
     paletteRecentUsageRef.current = paletteRecentUsage;
   }, [paletteRecentUsage]);
+
+  useEffect(() => {
+    applyThemeToDocument(activeTheme);
+  }, [activeTheme]);
 
   useEffect(() => {
     if (!hasHydratedPersistedState) {
@@ -3069,6 +3098,37 @@ export function App(): ReactElement {
         setAiSettingsDraft({ ...settings, apiKey: "" });
       })
       .catch(() => undefined);
+  };
+
+  const persistThemeSettings = (nextThemeId: string, nextCustomThemes: WmuxTheme[]): void => {
+    void window.wmux?.theme
+      ?.setSettings({
+        themeId: nextThemeId,
+        customThemes: serializeCustomThemes(nextCustomThemes)
+      })
+      .then((settings) => {
+        setThemeId(settings.themeId);
+        setCustomThemes(normalizePersistedCustomThemes(settings.customThemes));
+      })
+      .catch(() => undefined);
+  };
+
+  const handleSelectTheme = (nextThemeId: string): void => {
+    setThemeId(nextThemeId);
+    persistThemeSettings(nextThemeId, customThemes);
+  };
+
+  const handleImportTheme = (content: string): ThemeImportResult => {
+    const result = importThemesFromJson(content);
+    if (!result.ok) {
+      return result;
+    }
+    const nextCustomThemes = mergeCustomThemes(customThemes, result.themes);
+    const nextThemeId = result.themes[0]?.id ?? themeId;
+    setThemeId(nextThemeId);
+    setCustomThemes(nextCustomThemes);
+    persistThemeSettings(nextThemeId, nextCustomThemes);
+    return result;
   };
 
   const buildPaletteCommands = (): PaletteCommand[] => {
@@ -4777,6 +4837,8 @@ export function App(): ReactElement {
         securitySettings={securitySettings}
         aiSettings={aiSettings}
         aiSettingsDraft={aiSettingsDraft}
+        themes={availableThemes}
+        activeThemeId={activeTheme.id}
         onToggleNotifications={() => {
           setNotificationsOpen((isOpen) => !isOpen);
           setSettingsOpen(false);
@@ -4789,6 +4851,8 @@ export function App(): ReactElement {
         onSaveSecurityMode={handleSaveSecurityMode}
         onAiSettingsDraftChange={setAiSettingsDraft}
         onSaveAiSettings={handleSaveAiSettings}
+        onSelectTheme={handleSelectTheme}
+        onImportTheme={handleImportTheme}
       />
       <section className="workspaceArea">
         <TitleBar
@@ -4823,6 +4887,7 @@ export function App(): ReactElement {
             onOpenTerminalUrl={handleOpenTerminalUrl}
             onTerminalOutput={handleTerminalOutput}
             aiSettings={aiSettings}
+            terminalTheme={activeTheme.terminal}
             onExplainBlock={explainBlockWithAi}
             onAiSuggest={requestAiCommandSuggestions}
           />
@@ -5332,12 +5397,16 @@ function WorkspaceSidebar({
   securitySettings,
   aiSettings,
   aiSettingsDraft,
+  themes,
+  activeThemeId,
   onToggleNotifications,
   onToggleSettings,
   onSecurityModeDraftChange,
   onSaveSecurityMode,
   onAiSettingsDraftChange,
-  onSaveAiSettings
+  onSaveAiSettings,
+  onSelectTheme,
+  onImportTheme
 }: {
   workspaces: Workspace[];
   activeWorkspaceId: string;
@@ -5362,12 +5431,16 @@ function WorkspaceSidebar({
   securitySettings: SocketSecuritySettings | null;
   aiSettings: AiSettings;
   aiSettingsDraft: AiSettings;
+  themes: WmuxTheme[];
+  activeThemeId: string;
   onToggleNotifications: () => void;
   onToggleSettings: () => void;
   onSecurityModeDraftChange: (mode: SocketSecurityMode) => void;
   onSaveSecurityMode: () => void;
   onAiSettingsDraftChange: (settings: AiSettings) => void;
   onSaveAiSettings: () => void;
+  onSelectTheme: (themeId: string) => void;
+  onImportTheme: (content: string) => ThemeImportResult;
 }): ReactElement {
   const notificationItems = workspaces.filter((workspace) =>
     Boolean(workspace.notice || workspace.recentEvents?.length)
@@ -5681,6 +5754,13 @@ function WorkspaceSidebar({
         </button>
         {settingsOpen && (
           <div className="settingsPanel" aria-label="Settings panel">
+            <ThemePicker
+              themes={themes}
+              selectedThemeId={activeThemeId}
+              onSelectTheme={onSelectTheme}
+              onImportTheme={onImportTheme}
+            />
+            <div className="settingsDivider" />
             <label className="settingsField">
               <span>Socket security</span>
               <select
@@ -5807,6 +5887,7 @@ function LayoutRenderer({
   onOpenTerminalUrl,
   onTerminalOutput,
   aiSettings,
+  terminalTheme,
   onExplainBlock,
   onAiSuggest
 }: {
@@ -5824,6 +5905,7 @@ function LayoutRenderer({
   onOpenTerminalUrl: (url: string) => void;
   onTerminalOutput: (surfaceId: string, output: string) => void;
   aiSettings: AiSettings;
+  terminalTheme: TerminalTheme;
   onExplainBlock: (block: Block) => void;
   onAiSuggest: (payload: { prompt: string; surfaceId: string; cwd: string; shell: ShellProfile }) => void;
 }): ReactElement {
@@ -5843,6 +5925,7 @@ function LayoutRenderer({
         onOpenTerminalUrl={onOpenTerminalUrl}
         onTerminalOutput={onTerminalOutput}
         aiSettings={aiSettings}
+        terminalTheme={terminalTheme}
         onExplainBlock={onExplainBlock}
         onAiSuggest={onAiSuggest}
       />
@@ -5873,6 +5956,7 @@ function LayoutRenderer({
         onOpenTerminalUrl={onOpenTerminalUrl}
         onTerminalOutput={onTerminalOutput}
         aiSettings={aiSettings}
+        terminalTheme={terminalTheme}
         onExplainBlock={onExplainBlock}
         onAiSuggest={onAiSuggest}
       />
@@ -5892,6 +5976,7 @@ function LayoutRenderer({
         onOpenTerminalUrl={onOpenTerminalUrl}
         onTerminalOutput={onTerminalOutput}
         aiSettings={aiSettings}
+        terminalTheme={terminalTheme}
         onExplainBlock={onExplainBlock}
         onAiSuggest={onAiSuggest}
       />
@@ -5959,6 +6044,7 @@ function PaneView({
   onOpenTerminalUrl,
   onTerminalOutput,
   aiSettings,
+  terminalTheme,
   onExplainBlock,
   onAiSuggest
 }: {
@@ -5975,6 +6061,7 @@ function PaneView({
   onOpenTerminalUrl: (url: string) => void;
   onTerminalOutput: (surfaceId: string, output: string) => void;
   aiSettings: AiSettings;
+  terminalTheme: TerminalTheme;
   onExplainBlock: (block: Block) => void;
   onAiSuggest: (payload: { prompt: string; surfaceId: string; cwd: string; shell: ShellProfile }) => void;
 }): ReactElement {
@@ -6059,6 +6146,7 @@ function PaneView({
               onOpenTerminalUrl={onOpenTerminalUrl}
               onTerminalOutput={onTerminalOutput}
               aiSettings={aiSettings}
+              terminalTheme={terminalTheme}
               onExplainBlock={onExplainBlock}
               onAiSuggest={onAiSuggest}
             />
@@ -6153,6 +6241,7 @@ function SurfaceBody({
   onOpenTerminalUrl,
   onTerminalOutput,
   aiSettings,
+  terminalTheme,
   onExplainBlock,
   onAiSuggest
 }: {
@@ -6164,6 +6253,7 @@ function SurfaceBody({
   onOpenTerminalUrl: (url: string) => void;
   onTerminalOutput: (surfaceId: string, output: string) => void;
   aiSettings: AiSettings;
+  terminalTheme: TerminalTheme;
   onExplainBlock: (block: Block) => void;
   onAiSuggest: (payload: { prompt: string; surfaceId: string; cwd: string; shell: ShellProfile }) => void;
 }): ReactElement {
@@ -6180,6 +6270,7 @@ function SurfaceBody({
       onOpenUrl={onOpenTerminalUrl}
       onOutput={onTerminalOutput}
       aiSettings={aiSettings}
+      terminalTheme={terminalTheme}
       onExplainBlock={onExplainBlock}
       onAiSuggest={onAiSuggest}
     />

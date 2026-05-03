@@ -21,6 +21,8 @@ import type {
   SocketSecuritySettings,
   TerminalInputModeEvent,
   TerminalNotificationPayload,
+  ThemeSettings,
+  ThemeSettingsUpdate,
   WmuxProjectConfigResult,
   WorkspaceInspection
 } from "../shared/types";
@@ -54,6 +56,11 @@ const api = {
       ipcRenderer.on("ai:stream", listener);
       return () => ipcRenderer.removeListener("ai:stream", listener);
     }
+  },
+  theme: {
+    getSettings: (): Promise<ThemeSettings> => ipcRenderer.invoke("theme:getSettings"),
+    setSettings: (payload: ThemeSettingsUpdate): Promise<ThemeSettings> =>
+      ipcRenderer.invoke("theme:setSettings", payload)
   },
   config: {
     loadProjectConfig: (): Promise<WmuxProjectConfigResult> => ipcRenderer.invoke("config:loadProjectConfig")

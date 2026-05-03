@@ -4,8 +4,10 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   mergeAiSettingsUpdate,
+  mergeThemeSettingsUpdate,
   readAppSettings,
   resolveAiSettings,
+  resolveThemeSettings,
   toPublicAiSettings,
   updateAppSettings
 } from "./settingsStore";
@@ -63,5 +65,40 @@ describe("settingsStore", () => {
     const raw = await readFile(settingsPath, "utf8");
     expect(raw).not.toContain("ghp_1234567890abcdefghijkl");
     expect(readAppSettings(settingsPath).socketSecurityMode).toBe("allowAll");
+  });
+
+  it("合并主题配置时保留既有字段", () => {
+    const settings = mergeThemeSettingsUpdate(
+      { socketSecurityMode: "token", ai: { enabled: true } },
+      {
+        themeId: "dracula",
+        customThemes: [
+          {
+            id: "custom:ocean",
+            name: "Ocean",
+            terminal: {
+              background: "#001122",
+              foreground: "#ddeeff"
+            }
+          }
+        ]
+      }
+    );
+
+    expect(settings.socketSecurityMode).toBe("token");
+    expect(settings.ai?.enabled).toBe(true);
+    expect(resolveThemeSettings(settings)).toEqual({
+      themeId: "dracula",
+      customThemes: [
+        {
+          id: "custom:ocean",
+          name: "Ocean",
+          terminal: {
+            background: "#001122",
+            foreground: "#ddeeff"
+          }
+        }
+      ]
+    });
   });
 });

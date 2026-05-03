@@ -720,6 +720,21 @@ export type PersistedBrowserSession = {
   url: string;
 };
 
+export type CustomThemeDefinition = {
+  id: string;
+  name: string;
+  colorScheme?: "dark" | "light";
+  colors?: Record<string, string>;
+  terminal?: Record<string, string>;
+};
+
+export type ThemeSettings = {
+  themeId: string;
+  customThemes: CustomThemeDefinition[];
+};
+
+export type ThemeSettingsUpdate = Partial<ThemeSettings>;
+
 export type PersistedAppState = {
   version: 1;
   activeWorkspaceId: string;

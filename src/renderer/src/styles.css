@@ -447,7 +447,7 @@ kbd {
 
 .utilityButtonActive {
   border-color: var(--accent);
-  background: rgba(61, 174, 233, 0.1);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent);
 }
 
@@ -469,7 +469,7 @@ kbd {
   gap: 8px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  background: #11151a;
+  background: var(--bg-pane);
   padding: 9px;
 }
 
@@ -635,6 +635,96 @@ kbd {
 .settingsDivider {
   height: 1px;
   background: var(--border-subtle);
+}
+
+.settingsSectionHeader {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.themePicker {
+  display: grid;
+  gap: 7px;
+}
+
+.themeGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.themeOption {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-control);
+  padding: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.themeOption:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.themeOptionActive {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.themeSwatch {
+  display: grid;
+  height: 22px;
+  min-width: 0;
+  grid-template-columns: 34% 1fr;
+  grid-template-rows: 1fr 1fr;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  background: var(--theme-swatch-bg);
+}
+
+.themeSwatch span:first-child {
+  grid-row: 1 / 3;
+  background: var(--theme-swatch-sidebar);
+}
+
+.themeSwatch span:nth-child(2) {
+  background: var(--theme-swatch-bg);
+}
+
+.themeSwatch span:nth-child(3) {
+  background: var(--theme-swatch-accent);
+}
+
+.themeName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.themeImportButton {
+  justify-content: center;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .aiSettingsGroup {

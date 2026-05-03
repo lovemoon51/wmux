@@ -20,8 +20,10 @@ import { requestChatCompletion } from "./ai/aiClient";
 import { redactSecrets } from "./ai/redaction";
 import {
   mergeAiSettingsUpdate,
+  mergeThemeSettingsUpdate,
   readAppSettings,
   resolveAiSettings,
+  resolveThemeSettings,
   toPublicAiSettings,
   updateAppSettings
 } from "./settingsStore";
@@ -47,6 +49,8 @@ import type {
   SocketSecuritySettings,
   SocketRpcRequest,
   SocketRpcResponse,
+  ThemeSettings,
+  ThemeSettingsUpdate,
   WmuxCommandConfig,
   WmuxCommandArg,
   WmuxConfigSource,
@@ -235,6 +239,17 @@ async function writeAiSettings(update: AiSettingsUpdate): Promise<AiSettings> {
     mergeAiSettingsUpdate(currentSettings, update, safeStorage)
   );
   return toPublicAiSettings(resolveAiSettings(settings, safeStorage));
+}
+
+function getThemeSettings(): ThemeSettings {
+  return resolveThemeSettings(readAppSettings(getSettingsPath()));
+}
+
+async function writeThemeSettings(update: ThemeSettingsUpdate): Promise<ThemeSettings> {
+  const settings = await updateAppSettings(getSettingsPath(), (currentSettings) =>
+    mergeThemeSettingsUpdate(currentSettings, update)
+  );
+  return resolveThemeSettings(settings);
 }
 
 function emitAiStream(requestId: string, event: AiStreamEventWithoutRequestId): void {
@@ -871,6 +886,13 @@ app.whenReady().then(() => {
       throw createRpcError("BAD_REQUEST", "AI settings update 必须是对象");
     }
     return writeAiSettings(update);
+  });
+  ipcMain.handle("theme:getSettings", (): ThemeSettings => getThemeSettings());
+  ipcMain.handle("theme:setSettings", async (_event, update: ThemeSettingsUpdate): Promise<ThemeSettings> => {
+    if (!isRecord(update)) {
+      throw createRpcError("BAD_REQUEST", "theme settings update 必须是对象");
+    }
+    return writeThemeSettings(update);
   });
   ipcMain.handle("ai:cancel", (_event, request: AiCancelRequest): { ok: true } => {
     if (!isRecord(request) || typeof request.requestId !== "string") {

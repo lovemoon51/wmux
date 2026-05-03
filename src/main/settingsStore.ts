@@ -1,7 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { AiSettings, AiSettingsUpdate, SocketSecurityMode } from "../shared/types";
+import type {
+  AiSettings,
+  AiSettingsUpdate,
+  CustomThemeDefinition,
+  SocketSecurityMode,
+  ThemeSettings,
+  ThemeSettingsUpdate
+} from "../shared/types";
 
 export type SafeStorageAdapter = {
   isEncryptionAvailable: () => boolean;
@@ -12,6 +19,7 @@ export type SafeStorageAdapter = {
 export type AppSettings = {
   socketSecurityMode?: SocketSecurityMode;
   ai?: StoredAiSettings;
+  theme?: StoredThemeSettings;
 };
 
 type StoredAiSettings = {
@@ -24,12 +32,22 @@ type StoredAiSettings = {
   maxOutputBytes?: number;
 };
 
+type StoredThemeSettings = {
+  themeId?: string;
+  customThemes?: CustomThemeDefinition[];
+};
+
 export const defaultAiSettings: AiSettings = {
   enabled: false,
   endpoint: "https://api.openai.com/v1",
   model: "gpt-4o-mini",
   redactSecrets: true,
   maxOutputBytes: 4096
+};
+
+export const defaultThemeSettings: ThemeSettings = {
+  themeId: "default",
+  customThemes: []
 };
 
 export function readAppSettings(settingsPath: string): AppSettings {
@@ -80,6 +98,31 @@ export function toPublicAiSettings(settings: AiSettings): AiSettings {
   const publicSettings = { ...settings };
   delete publicSettings.apiKey;
   return publicSettings;
+}
+
+export function resolveThemeSettings(settings: AppSettings): ThemeSettings {
+  const stored = isRecord(settings.theme) ? settings.theme : {};
+  return {
+    themeId: readNonEmptyString(stored.themeId) ?? defaultThemeSettings.themeId,
+    customThemes: Array.isArray(stored.customThemes)
+      ? stored.customThemes.filter(isCustomThemeDefinition)
+      : defaultThemeSettings.customThemes
+  };
+}
+
+export function mergeThemeSettingsUpdate(current: AppSettings, update: ThemeSettingsUpdate): AppSettings {
+  const previousTheme = resolveThemeSettings(current);
+  const nextTheme: ThemeSettings = {
+    themeId: typeof update.themeId === "string" && update.themeId.trim() ? update.themeId.trim() : previousTheme.themeId,
+    customThemes: Array.isArray(update.customThemes)
+      ? update.customThemes.filter(isCustomThemeDefinition)
+      : previousTheme.customThemes
+  };
+
+  return {
+    ...current,
+    theme: nextTheme
+  };
 }
 
 export function mergeAiSettingsUpdate(
@@ -152,6 +195,13 @@ function decryptApiKey(value: string | undefined, safeStorage?: SafeStorageAdapt
 
 function readNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function isCustomThemeDefinition(value: unknown): value is CustomThemeDefinition {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return typeof value.id === "string" && typeof value.name === "string";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
